@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Python env
+venv/
+
+# logs
+logs/
+*.log
+
+# runtime output
+out/
+
+# secrets
+.env
+
+# miner
+xmrig/*
+xmrig.mac/*
