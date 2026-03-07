@@ -1,0 +1,23 @@
+{
+  "lang_policy": {
+    "default": "zh",
+    "by_user": {
+      "6816103936": "en",
+      "6321810063": "en"
+    }
+  },
+  "backup": {
+    "enabled": true,
+    "schedule": "daily",
+    "keep": 7
+  },
+  "entry_rule": {
+    "allow_negative": false,
+    "amount_decimals": 2,
+    "quantity_decimals": 3,
+    "expense_note_required": false
+  },
+  "audit": {
+    "enabled": true
+  }
+}

@@ -1,0 +1,232 @@
+{
+  "accounts": {
+    "cash": 17936700.0,
+    "bank": 0.0
+  },
+  "records": [
+    {
+      "time": "2026-03-01T17:15:26.976875",
+      "type": "income",
+      "amount": 15000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-01T17:16:58.709052",
+      "type": "income",
+      "amount": 259000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-02T08:25:25.267096",
+      "type": "expense",
+      "amount": 100000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-02T08:54:36.540623",
+      "type": "expense",
+      "amount": 13000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:43:43.002997",
+      "type": "expense",
+      "amount": 52000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:44:20.254656",
+      "type": "expense",
+      "amount": 22000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:46:03.912128",
+      "type": "income",
+      "amount": 30000000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:46:20.368722",
+      "type": "expense",
+      "amount": 90000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:49:32.413879",
+      "type": "expense",
+      "amount": 1760000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:52:01.000790",
+      "type": "income",
+      "amount": 48000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:52:39.479847",
+      "type": "income",
+      "amount": 392000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:54:25.141123",
+      "type": "expense",
+      "amount": 5000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T13:56:45.333261",
+      "type": "expense",
+      "amount": 2198000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T17:22:58.140642",
+      "type": "expense",
+      "amount": 325000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T17:23:44.525229",
+      "type": "expense",
+      "amount": 24100.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-03T17:24:45.046655",
+      "type": "expense",
+      "amount": 2154000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T10:29:30.772269",
+      "type": "expense",
+      "amount": 11900.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T10:30:30.046404",
+      "type": "expense",
+      "amount": 6700.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T10:31:19.056037",
+      "type": "expense",
+      "amount": 13000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T11:58:23.101758",
+      "type": "expense",
+      "amount": 35000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T14:35:51.066670",
+      "type": "expense",
+      "amount": 35000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T14:37:21.057088",
+      "type": "expense",
+      "amount": 1841000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T14:37:22.993313",
+      "type": "expense",
+      "amount": 45000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T14:37:23.579521",
+      "type": "expense",
+      "amount": 6800.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T17:29:39.578589",
+      "type": "expense",
+      "amount": 23000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-04T17:30:18.086094",
+      "type": "income",
+      "amount": 76500.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T10:58:17.336224",
+      "type": "income",
+      "amount": 65000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T13:55:16.235361",
+      "type": "income",
+      "amount": 52000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T13:56:38.240684",
+      "type": "expense",
+      "amount": 62300.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T13:57:09.558237",
+      "type": "expense",
+      "amount": 13000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T14:03:16.243642",
+      "type": "expense",
+      "amount": 30000.0,
+      "account": "cash",
+      "note": ""
+    },
+    {
+      "time": "2026-03-05T14:04:46.436052",
+      "type": "expense",
+      "amount": 4105000.0,
+      "account": "cash",
+      "note": ""
+    }
+  ]
+}

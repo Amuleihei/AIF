@@ -1,0 +1,4 @@
+{"time":"2026-03-05T17:31:18","kid":"A","trays":14,"m3":0.49268520000000005,"source":"admin_fix","note":"align to actual: out=14, remain=6"}
+{"time": "2026-03-06T11:09:56", "kid": "A", "trays": 6, "source": "operator", "m3": 0.2111508, "meta": {"method": "full"}}
+{"time": "2026-03-06T14:06:19", "kid": "A", "trays": 6, "source": "operator", "m3": 0.2111508, "meta": {"method": "full"}}
+{"time": "2026-03-06T17:25:31", "kid": "A", "trays": 6, "source": "operator", "m3": 0.2111508, "meta": {"method": "partial"}}

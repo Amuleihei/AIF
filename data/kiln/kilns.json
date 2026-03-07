@@ -1,0 +1,1015 @@
+{
+  "A": {
+    "trays": [
+      {
+        "id": "0303-01",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 297
+      },
+      {
+        "id": "0303-02",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0303-02-01",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 297
+      },
+      {
+        "id": "0303-02-02",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 297
+      },
+      {
+        "id": "0303-05",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0304-01",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0304-02",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0304-06",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-01",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-02",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-03",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-04",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-05",
+        "spec": "95x378",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 378
+      },
+      {
+        "id": "0305-06",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-07",
+        "spec": "95x378",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 378
+      },
+      {
+        "id": "0305-08",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-09",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-10",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-11",
+        "spec": "95x405",
+        "count": 1,
+        "full_spec": "950x95x60",
+        "pcs": 405
+      },
+      {
+        "id": "0305-12",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-13",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-14",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-15",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0305-16",
+        "spec": "95x540",
+        "count": 1,
+        "full_spec": "950x95x46",
+        "pcs": 540
+      },
+      {
+        "id": "0306-01",
+        "spec": "95x291",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 291
+      },
+      {
+        "id": "0306-02",
+        "spec": "95x291",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 291
+      },
+      {
+        "id": "0306-03",
+        "spec": "95x291",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 291
+      },
+      {
+        "id": "0306-04",
+        "spec": "95x378",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 378
+      },
+      {
+        "id": "0306-05",
+        "spec": "95x291",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 291
+      },
+      {
+        "id": "0306-06",
+        "spec": "95x378",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 378
+      },
+      {
+        "id": "0306-07",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-08",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-09",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-10",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-11",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-12",
+        "spec": "95x405",
+        "count": 1,
+        "full_spec": "950x95x60",
+        "pcs": 405
+      },
+      {
+        "id": "0306-13",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-14",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-15",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-16",
+        "spec": "95x297",
+        "count": 1,
+        "full_spec": "950x95x84",
+        "pcs": 297
+      },
+      {
+        "id": "0306-17",
+        "spec": "95x378",
+        "count": 1,
+        "full_spec": "950x95x71",
+        "pcs": 378
+      },
+      {
+        "id": "F20260304_20481101",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481102",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481103",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481104",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481105",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481106",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481107",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481108",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481109",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481110",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481111",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260304_20481112",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": null
+      },
+      {
+        "id": "F20260306180520001",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": 0
+      },
+      {
+        "id": "F20260306180932001",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": 0
+      },
+      {
+        "id": "F20260306180932002",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": 0
+      },
+      {
+        "id": "F20260306180932003",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": 0
+      },
+      {
+        "id": "F20260306180932004",
+        "spec": "84x21",
+        "count": 1,
+        "full_spec": "84x21",
+        "pcs": 0
+      }
+    ],
+    "status": "drying",
+    "start": "2026-03-06T13:29:52.545257",
+    "completed_time": null,
+    "last_volume": 0.4223016,
+    "last_trays": 55
+  },
+  "B": {
+    "trays": [
+      {
+        "id": "B001",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B002",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B003",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B004",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B005",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B006",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B007",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B008",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B009",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B010",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B011",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B012",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B013",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B014",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B015",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B016",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B017",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B018",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B019",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B020",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B021",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B022",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B023",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B024",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B025",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B026",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B027",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B028",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B029",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B030",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B031",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B032",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B033",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B034",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B035",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B036",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B037",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B038",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B039",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B040",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B041",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B042",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B043",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B044",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B045",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B046",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B047",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B048",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B049",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B050",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B051",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B052",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B053",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B054",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "B055",
+        "spec": "84x21",
+        "count": 1
+      }
+    ],
+    "status": "drying",
+    "start": "2026-03-02T12:24:33",
+    "completed_time": null,
+    "last_volume": 0.0
+  },
+  "C": {
+    "trays": [
+      {
+        "id": "C001",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C002",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C003",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C004",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C005",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C006",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C007",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C008",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C009",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C010",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C011",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C012",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C013",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C014",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C015",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C016",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C017",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C018",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C019",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C020",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C021",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C022",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C023",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C024",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C025",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C026",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C027",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C028",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C029",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C030",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C031",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C032",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C033",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C034",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C035",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C036",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C037",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C038",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C039",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C040",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C041",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C042",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C043",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C044",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C045",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C046",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C047",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C048",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C049",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C050",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C051",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C052",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C053",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C054",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C055",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C056",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C057",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C058",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C059",
+        "spec": "84x21",
+        "count": 1
+      },
+      {
+        "id": "C060",
+        "spec": "84x21",
+        "count": 1
+      }
+    ],
+    "status": "drying",
+    "start": "2026-03-02T12:24:33",
+    "completed_time": null,
+    "last_volume": 0.0
+  },
+  "D": {
+    "trays": [],
+    "status": "empty",
+    "start": null,
+    "completed_time": null,
+    "last_volume": 0.0
+  }
+}

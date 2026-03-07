@@ -1,0 +1,50 @@
+{
+  "miner": {
+    "status": {
+      "type": "keyword",
+      "words": ["挖矿状态", "矿机状态", "矿机怎么样"]
+    },
+    "start": {
+      "type": "keyword",
+      "words": ["开始挖矿", "启动挖矿", "开矿"]
+    },
+    "stop": {
+      "type": "keyword",
+      "words": ["停止挖矿", "关闭挖矿", "停矿"]
+    },
+    "restart": {
+      "type": "keyword",
+      "words": ["重启挖矿", "重开矿"]
+    }
+  },
+
+  "finance": {
+    "query_today": {
+      "type": "regex",
+      "pattern": "今天.*(多少|支出|花)"
+    },
+    "income_today": {
+      "type": "regex",
+      "pattern": "今天.*收入"
+    },
+    "record_expense": {
+      "type": "keyword",
+      "words": ["买", "花", "支出", "采购", "吃"]
+    },
+    "record_income": {
+      "type": "keyword",
+      "words": ["收入", "收款", "回款", "到账"]
+    }
+  },
+
+  "system": {
+    "auto_on": {
+      "type": "keyword",
+      "words": ["自动模式", "开启自动调度"]
+    },
+    "auto_off": {
+      "type": "keyword",
+      "words": ["关闭自动", "停止自动调度"]
+    }
+  }
+}

@@ -1,0 +1,654 @@
+{
+  "raw": {
+    "原木": 16.8371
+  },
+  "wip": {},
+  "product": {
+    "0213-001#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0210-002#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0210-003#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0212-004#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0213-005#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0213-006#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0213-007#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 528,
+      "volume": 0.83525904,
+      "status": "库存"
+    },
+    "0213-008#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0213-009#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0216-010#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 1632,
+      "volume": 0.73547712,
+      "status": "库存"
+    },
+    "0216-011#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 705,
+      "volume": 0.8157555,
+      "status": "库存"
+    },
+    "0216-012#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 658,
+      "volume": 0.8926428,
+      "status": "库存"
+    },
+    "0217-013#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 2160,
+      "volume": 0.8083152,
+      "status": "库存"
+    },
+    "0217-014#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0217-015#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 1536,
+      "volume": 0.81156096,
+      "status": "库存"
+    },
+    "0218-016#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0218-017#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0218-018#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0218-019#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0219-020#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0219-021#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0219-022#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.85303449,
+      "status": "库存"
+    },
+    "0219-023#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0219-024#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0220-025#AB": {
+      "spec": "44x21",
+      "grade": "AB",
+      "pcs": 2208,
+      "volume": 0.75487104,
+      "status": "库存"
+    },
+    "0220-026#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0220-027#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0221-028#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0221-029#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0223-030#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0223-031#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 2304,
+      "volume": 0.75769344,
+      "status": "库存"
+    },
+    "0223-032#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0224-033#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.85303449,
+      "status": "库存"
+    },
+    "0224-034#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0224-035#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0224-036#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 2160,
+      "volume": 0.8083152,
+      "status": "库存"
+    },
+    "0224-037#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 654,
+      "volume": 0.8872164,
+      "status": "库存"
+    },
+    "0225-038#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 2160,
+      "volume": 0.8328096,
+      "status": "库存"
+    },
+    "0225-039#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0225-040#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 1632,
+      "volume": 0.73547712,
+      "status": "库存"
+    },
+    "0225-041#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 654,
+      "volume": 0.86853816,
+      "status": "库存"
+    },
+    "0226-042#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 1536,
+      "volume": 0.81156096,
+      "status": "库存"
+    },
+    "0226-043#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0211-001#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0212-002#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0213-003#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0213-004#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 528,
+      "volume": 0.83525904,
+      "status": "库存"
+    },
+    "0217-007#BC": {
+      "spec": "68x21",
+      "grade": "BC",
+      "pcs": 658,
+      "volume": 0.8926428,
+      "status": "库存"
+    },
+    "0217-008#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0218-009#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0219-010#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0219-011#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0219-012#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0219-013#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0220-014#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0221-015#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0223-016#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0224-017#BC": {
+      "spec": "58x21",
+      "grade": "BC",
+      "pcs": 705,
+      "volume": 0.8157555,
+      "status": "库存"
+    },
+    "0224-018#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0225-019#BC": {
+      "spec": "68x21",
+      "grade": "BC",
+      "pcs": 654,
+      "volume": 0.8872164,
+      "status": "库存"
+    },
+    "0226-020#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0226-021#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0227-044#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 705,
+      "volume": 0.8157555,
+      "status": "库存"
+    },
+    "0227-045#AB": {
+      "spec": "44x21",
+      "grade": "AB",
+      "pcs": 940,
+      "volume": 0.825132,
+      "status": "库存"
+    },
+    "0227-046#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0227-047#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0227-048#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0227-049#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0303-050#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0304-051#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0304-052#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0304-053#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1728,
+      "volume": 0.79361856,
+      "status": "库存"
+    },
+    "0304-054#AB": {
+      "spec": "44x21",
+      "grade": "AB",
+      "pcs": 3024,
+      "volume": 0.75442752,
+      "status": "库存"
+    },
+    "0304-055#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 2160,
+      "volume": 0.8083152,
+      "status": "库存"
+    },
+    "0304-056#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0227-022#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0303-023#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0304-024#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0304-025#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0213-005#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0213-006#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 528,
+      "volume": 0.8532216,
+      "status": "库存"
+    },
+    "0304-057#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0305-058#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.85303449,
+      "status": "库存"
+    },
+    "0305-059#AB": {
+      "spec": "68x21",
+      "grade": "AB",
+      "pcs": 654,
+      "volume": 0.8872164,
+      "status": "库存"
+    },
+    "0305-060#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.81785781,
+      "status": "库存"
+    },
+    "0304-057": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0305-061#AB": {
+      "spec": "58x21",
+      "grade": "AB",
+      "pcs": 705,
+      "volume": 0.7985817,
+      "status": "库存"
+    },
+    "0305-062#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 1248,
+      "volume": 0.78545376,
+      "status": "库存"
+    },
+    "0305-063#AB": {
+      "spec": "81x21",
+      "grade": "AB",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0306-026#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 517,
+      "volume": 0.83544615,
+      "status": "库存"
+    },
+    "0306-027#BC": {
+      "spec": "81x21",
+      "grade": "BC",
+      "pcs": 2160,
+      "volume": 0.8083152,
+      "status": "库存"
+    }
+  },
+  "meta": {
+    "last_product_in": {
+      "time": "2026-03-06T17:44:17",
+      "action": "create",
+      "ids": [
+        "0306-027#BC"
+      ]
+    }
+  }
+}
