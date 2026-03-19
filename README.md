@@ -1,4 +1,4 @@
-# AIF - 木材厂智能管理系统
+# AIF - 木材厂智能管理系统 / Smart Management for Wood Factories / သစ်စက်ရုံ စမတ်စီမံခန့်ခွဲမှုစနစ်
 
 中文 | English | မြန်မာ
 
@@ -75,7 +75,7 @@ python web_app.py
 ## English
 
 ### Positioning
-AIF is an all-in-one intelligent management system built for Southeast Asian wood processing factories.  
+AIF is an all-in-one intelligent management system built for Southeast Asian rubberwood processing factories.  
 It digitalizes the full production chain from log intake to final shipment, with Telegram Bot + Web console collaboration.
 
 ### Best For
@@ -143,7 +143,7 @@ If this project helps you, you can support development here:
 ## မြန်မာ
 
 ### စနစ်定位
-AIF သည် အရှေ့တောင်အာရှ သစ်လုပ်ငန်းစက်ရုံများအတွက် ဖန်တီးထားသော all-in-one စမတ်စီမံခန့်ခွဲမှုစနစ်ဖြစ်သည်။  
+AIF သည် အရှေ့တောင်အာရှ ရော်ဘာသစ် wood processing စက်ရုံများအတွက် ဖန်တီးထားသော all-in-one စမတ်စီမံခန့်ခွဲမှုစနစ်ဖြစ်သည်။  
 Raw log ဝင်ရောက်ချိန်မှ နောက်ဆုံး shipment အထိ လုပ်ငန်းစဉ်အပြည့်ကို Telegram Bot + Web Console ဖြင့် စီမံနိုင်သည်။
 
 ### အသုံးချရန်သင့်တော်သောနေရာ
