@@ -1,23 +1,30 @@
 # macOS
 .DS_Store
+.vscode/
 
 # Python
 __pycache__/
 *.pyc
 
-# Python env
+# Python virtual env
 venv/
 
 # logs
 logs/
 *.log
 
-# runtime output
+# runtime
+*.pid
 out/
 
 # secrets
 .env
 
-# miner
-xmrig/*
-xmrig.mac/*
+# miners
+xmrig/
+xmrig.mac/
+
+# local test files
+test_*.txt
+
+.env.example
