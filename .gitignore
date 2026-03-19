@@ -36,3 +36,6 @@ test_*.txt
 *.xlsx
 logo.png
 **/logo.png
+
+# local certs
+ssl/
