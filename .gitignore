@@ -13,6 +13,9 @@ venv/
 logs/
 *.log
 
+# backups
+backups/
+
 # runtime
 *.pid
 out/
