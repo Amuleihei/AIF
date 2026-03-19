@@ -179,6 +179,104 @@ def register_auth_admin_routes(app, translate):
         role = str(getattr(current_user, "role", "") or "").strip().lower()
         return bool(current_user.has_permission("admin") or role in ("finance", "stats"))
 
+    def _localize_hr_option(value: str, kind: str, lang: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        key = raw.lower()
+
+        alias_map = {
+            "team": {
+                "办公室": "office",
+                "office": "office",
+                "office team": "office",
+                "锯工组": "saw_team",
+                "saw team": "saw_team",
+                "sawing team": "saw_team",
+                "窑工组": "kiln_team",
+                "kiln team": "kiln_team",
+                "拣选组": "sorting_team",
+                "sorting team": "sorting_team",
+                "物流组": "logistics_team",
+                "logistics team": "logistics_team",
+            },
+            "position": {
+                "财务": "finance",
+                "finance": "finance",
+                "统计": "statistics",
+                "stats": "statistics",
+                "statistics": "statistics",
+                "经理": "manager",
+                "manager": "manager",
+                "锯工": "sawyer",
+                "sawyer": "sawyer",
+                "窑工": "kiln_operator",
+                "kiln operator": "kiln_operator",
+                "拣选": "sorter",
+                "sorter": "sorter",
+                "发货员": "shipper",
+                "shipper": "shipper",
+                "仓管": "warehouse_keeper",
+                "warehouse keeper": "warehouse_keeper",
+            },
+            "salary_type": {
+                "日薪": "daily",
+                "daily": "daily",
+                "月薪": "monthly",
+                "monthly": "monthly",
+                "计件": "piecework",
+                "piecework": "piecework",
+                "hourly": "hourly",
+                "时薪": "hourly",
+            },
+        }
+        labels = {
+            "team": {
+                "office": {"zh": "办公室", "en": "Office", "my": "ရုံးအဖွဲ့"},
+                "saw_team": {"zh": "锯工组", "en": "Saw Team", "my": "လွှအသင်း"},
+                "kiln_team": {"zh": "窑工组", "en": "Kiln Team", "my": "အိုးဖိုအသင်း"},
+                "sorting_team": {"zh": "拣选组", "en": "Sorting Team", "my": "ရွေးချယ်အသင်း"},
+                "logistics_team": {"zh": "物流组", "en": "Logistics Team", "my": "ပို့ဆောင်ရေးအသင်း"},
+            },
+            "position": {
+                "finance": {"zh": "财务", "en": "Finance", "my": "ဘဏ္ဍာရေး"},
+                "statistics": {"zh": "统计", "en": "Statistics", "my": "စာရင်းအင်း"},
+                "manager": {"zh": "经理", "en": "Manager", "my": "မန်နေဂျာ"},
+                "sawyer": {"zh": "锯工", "en": "Sawyer", "my": "လွှလုပ်သား"},
+                "kiln_operator": {"zh": "窑工", "en": "Kiln Operator", "my": "အိုးဖိုလုပ်သား"},
+                "sorter": {"zh": "拣选", "en": "Sorter", "my": "ရွေးချယ်လုပ်သား"},
+                "shipper": {"zh": "发货员", "en": "Shipper", "my": "ပို့ဆောင်ရေးဝန်ထမ်း"},
+                "warehouse_keeper": {"zh": "仓管", "en": "Warehouse Keeper", "my": "ဂိုဒေါင်ထိန်း"},
+            },
+            "salary_type": {
+                "daily": {"zh": "日薪", "en": "Daily Wage", "my": "နေ့စားလစာ"},
+                "monthly": {"zh": "月薪", "en": "Monthly Salary", "my": "လစာ (လစဉ်)"},
+                "piecework": {"zh": "计件", "en": "Piece Rate", "my": "အပိုင်းလိုက်လစာ"},
+                "hourly": {"zh": "时薪", "en": "Hourly Wage", "my": "နာရီလိုက်လစာ"},
+            },
+        }
+        canonical = alias_map.get(kind, {}).get(key) or alias_map.get(kind, {}).get(raw)
+        if not canonical:
+            return raw
+        return labels.get(kind, {}).get(canonical, {}).get(lang, raw)
+
+    def _attach_hr_choice_labels(data: dict, lang: str) -> dict:
+        payload = dict(data or {})
+        team_options = payload.get("team_options", []) if isinstance(payload.get("team_options"), list) else []
+        position_options = payload.get("position_options", []) if isinstance(payload.get("position_options"), list) else []
+        salary_type_options = payload.get("salary_type_options", []) if isinstance(payload.get("salary_type_options"), list) else []
+        payload["team_choices"] = [
+            {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "team", lang)} for v in team_options
+        ]
+        payload["position_choices"] = [
+            {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "position", lang)} for v in position_options
+        ]
+        payload["salary_type_choices"] = [
+            {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "salary_type", lang)}
+            for v in salary_type_options
+        ]
+        return payload
+
     @app.route("/admin/users")
     @login_required
     def admin_users():
@@ -483,7 +581,7 @@ def register_auth_admin_routes(app, translate):
         texts = LANGUAGES.get(lang, LANGUAGES["zh"])
         result_msg = ""
         error_msg = ""
-        data = get_hr_employees_payload()
+        data = _attach_hr_choice_labels(get_hr_employees_payload(), lang)
         if request.method == "POST":
             form_action = str(request.form.get("form_action", "add") or "add").strip()
             if form_action == "edit":
@@ -513,7 +611,7 @@ def register_auth_admin_routes(app, translate):
                     salary_value=request.form.get("salary_value", ""),
                     join_date=request.form.get("join_date", ""),
                 )
-            data = payload
+            data = _attach_hr_choice_labels(payload, lang)
             if ok:
                 result_msg = msg
                 if form_action == "edit":

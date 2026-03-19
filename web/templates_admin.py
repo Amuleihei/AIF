@@ -828,20 +828,20 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
                     <input type="text" name="name" placeholder="{{ texts.get('hr_name_required', '姓名（必填）') }}" required>
                     <select name="team" id="team-select">
                         <option value="">{{ texts.get('hr_select_team', '请选择班组') }}</option>
-                        {% for team in data.team_options %}
-                        <option value="{{ team }}">{{ team }}</option>
+                        {% for team in data.team_choices %}
+                        <option value="{{ team.value }}">{{ team.label }}</option>
                         {% endfor %}
                     </select>
                     <select name="position" id="position-select">
                         <option value="">{{ texts.get('hr_select_position', '请选择岗位') }}</option>
-                        {% for p in data.position_options %}
-                        <option value="{{ p }}">{{ p }}</option>
+                        {% for p in data.position_choices %}
+                        <option value="{{ p.value }}">{{ p.label }}</option>
                         {% endfor %}
                     </select>
                     <select name="salary_type">
                         <option value="">{{ texts.get('hr_select_salary_type', '请选择薪资类型') }}</option>
-                        {% for st in data.salary_type_options %}
-                        <option value="{{ st }}">{{ st }}</option>
+                        {% for st in data.salary_type_choices %}
+                        <option value="{{ st.value }}">{{ st.label }}</option>
                         {% endfor %}
                     </select>
                     <input type="number" step="0.01" min="0" name="salary_value" placeholder="{{ texts.get('hr_salary_value', '薪资值') }}">
@@ -860,20 +860,20 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
                     <input type="text" name="display_name" id="edit-name" placeholder="{{ texts.get('hr_name', '姓名') }}" readonly>
                     <select name="team" id="edit-team-select">
                         <option value="">{{ texts.get('hr_select_team', '请选择班组') }}</option>
-                        {% for team in data.team_options %}
-                        <option value="{{ team }}">{{ team }}</option>
+                        {% for team in data.team_choices %}
+                        <option value="{{ team.value }}">{{ team.label }}</option>
                         {% endfor %}
                     </select>
                     <select name="position" id="edit-position-select">
                         <option value="">{{ texts.get('hr_select_position', '请选择岗位') }}</option>
-                        {% for p in data.position_options %}
-                        <option value="{{ p }}">{{ p }}</option>
+                        {% for p in data.position_choices %}
+                        <option value="{{ p.value }}">{{ p.label }}</option>
                         {% endfor %}
                     </select>
                     <select name="salary_type" id="edit-salary-type-select">
                         <option value="">{{ texts.get('hr_select_salary_type', '请选择薪资类型') }}</option>
-                        {% for st in data.salary_type_options %}
-                        <option value="{{ st }}">{{ st }}</option>
+                        {% for st in data.salary_type_choices %}
+                        <option value="{{ st.value }}">{{ st.label }}</option>
                         {% endfor %}
                     </select>
                     <input type="number" step="0.01" min="0" name="salary_value" id="edit-salary-value" placeholder="{{ texts.get('hr_salary_value', '薪资值') }}">

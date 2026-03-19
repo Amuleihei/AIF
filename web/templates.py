@@ -337,11 +337,11 @@ HTML_TEMPLATE = """
             {% set role = (current_user.role or '')|lower %}
             {% set can_hr_employees = current_user.has_permission('admin') or role in ['finance', 'stats'] %}
             {% if current_user.has_permission('admin') %}
-            <a href="{{ url_for('admin_root') }}">{{ texts.manage_link }}</a> | 
-            <a href="{{ url_for('admin_alert_center') }}">预警中心</a> | 
+            <a href="{{ url_for('admin_root') }}">{{ texts.get('admin_overview_link', texts.manage_link) }}</a> | 
+            <a href="{{ url_for('admin_alert_center') }}">{{ texts.get('alert_center_link', 'Alert Center') }}</a> | 
             {% endif %}
             {% if can_hr_employees %}
-            <a href="{{ url_for('admin_hr_employees') }}">员工管理</a> | 
+            <a href="{{ url_for('admin_hr_employees') }}">{{ texts.get('employee_mgmt_link', 'Employee Management') }}</a> | 
             {% endif %}
             <a href="{{ url_for('logout') }}" class="logout-btn">{{ texts.logout }}</a>
         </div>
