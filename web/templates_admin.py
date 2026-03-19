@@ -800,8 +800,10 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <a href="{{ url_for('admin_root') }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+        <a href="{{ hr_back_url }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+        {% if can_manage_hr_settings %}
         <a href="{{ url_for('admin_hr_settings') }}" class="link-inline">{{ texts.get('hr_settings_title', 'HR设置') }}</a>
+        {% endif %}
         <h1>{{ texts.get('hr_employee_mgmt_title', '员工管理') }}</h1>
 
         <div class="grid">

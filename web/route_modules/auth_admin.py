@@ -175,6 +175,10 @@ def register_auth_admin_routes(app, translate):
             except Exception:
                 pass
 
+    def _can_access_hr_employees() -> bool:
+        role = str(getattr(current_user, "role", "") or "").strip().lower()
+        return bool(current_user.has_permission("admin") or role in ("finance", "stats"))
+
     @app.route("/admin/users")
     @login_required
     def admin_users():
@@ -471,8 +475,8 @@ def register_auth_admin_routes(app, translate):
     @app.route("/admin/hr-employees", methods=["GET", "POST"])
     @login_required
     def admin_hr_employees():
-        if not current_user.has_permission("admin"):
-            flash(translate("no_admin_perm"), "error")
+        if not _can_access_hr_employees():
+            flash(translate("no_perm"), "error")
             return redirect(url_for("index"))
 
         lang = get_lang()
@@ -553,6 +557,8 @@ def register_auth_admin_routes(app, translate):
             error_msg=error_msg,
             lang=lang,
             texts=texts,
+            can_manage_hr_settings=bool(current_user.has_permission("admin")),
+            hr_back_url=url_for("admin_root") if current_user.has_permission("admin") else url_for("index"),
         )
 
     @app.route("/admin/add_user", methods=["POST"])
