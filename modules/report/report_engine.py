@@ -1,45 +1,4 @@
-import json
-from pathlib import Path
-
-
-# =====================================================
-# 数据路径（统一 AIF/data）
-# =====================================================
-
-DATA = Path.home() / "AIF/data"
-
-FINANCE_FILE = DATA / "finance/finance.json"
-INVENTORY_FILE = DATA / "inventory/inventory.json"
-KILN_FILE = DATA / "kiln/kilns.json"
-
-
-# =====================================================
-# 工具
-# =====================================================
-
-def load_json(p):
-
-    if not p.exists():
-        return {}
-
-    try:
-        return json.load(open(p))
-    except Exception:
-        return {}
-
-
-def finance_totals(d: dict):
-    income = d.get("income")
-    expense = d.get("expense")
-    if income is None or expense is None:
-        income = 0.0
-        expense = 0.0
-        for rec in d.get("records", []):
-            if rec.get("type") == "income":
-                income += float(rec.get("amount", 0))
-            elif rec.get("type") == "expense":
-                expense += float(rec.get("amount", 0))
-    return float(income), float(expense)
+from web.utils import get_stock_data
 
 
 # =====================================================
@@ -55,31 +14,21 @@ def finance_report():
 # =====================================================
 
 def production_report():
-
-    # 生产概况口径改为“真实数据源”，避免 production.json 未维护导致长期为 0
-    inv = load_json(INVENTORY_FILE)
-    raw_total = sum(inv.get("raw", {}).values()) if isinstance(inv.get("raw"), dict) else 0.0
-
-    # “累计产出”按当前成品库存（件数 + m³）展示，便于与库存对齐
-    prod_count = 0
-    prod_volume = 0.0
-    prod = inv.get("product", {}) if isinstance(inv.get("product"), dict) else {}
-    for item in prod.values():
-        if not isinstance(item, dict):
-            continue
-        if item.get("status") != "库存":
-            continue
-        prod_count += 1
-        try:
-            prod_volume += float(item.get("volume", 0) or 0)
-        except Exception:
-            pass
-
-    return (
-        "🏭 生产概况\n"
-        f"原木库存: {raw_total:.4f} MT\n"
-        f"累计产出: {prod_count}件 ({prod_volume:.2f} m³)"
-    )
+    try:
+        s = get_stock_data("zh")
+        return (
+            "🏭 生产概况\n"
+            f"原木库存: {float(s.get('log_stock', 0.0)):.4f} MT\n"
+            f"当前锯解库存: {int(s.get('saw_stock', 0) or 0)} 托\n"
+            f"当前药浸库存: {int(s.get('dip_stock', 0) or 0)} 托\n"
+            f"待入窑库存: {int(s.get('sorting_stock', 0) or 0)} 窑托\n"
+            f"窑完成库存: {int(s.get('kiln_done_stock', 0) or 0)} 窑托\n"
+            f"成品库存: {int(s.get('product_count', 0) or 0)} 件（{float(s.get('product_m3', 0.0)):.2f} m³）\n"
+            f"当前树皮库存: {float(s.get('bark_stock_m3', 0.0)):.2f} 立方\n"
+            f"当前木渣库存: {int(s.get('dust_bag_stock', 0) or 0)} 袋"
+        )
+    except Exception:
+        return "🏭 生产概况\n暂无记录"
 
 
 # =====================================================
@@ -99,35 +48,8 @@ def inventory_report():
 # =====================================================
 
 def kiln_report():
-
-    d = load_json(KILN_FILE)
-
-    if not d:
-        return "🔥 无窑数据"
-
-    lines = ["🔥 窑状态"]
-
-    running = 0
-
-    for k, v in d.items():
-
-        trays = v.get("trays", [])
-
-        if not trays:
-            lines.append(f"{k}窑: 空")
-            continue
-
-        status = v.get("status", "loading")
-
-        if status == "drying":
-            running += 1
-            lines.append(f"{k}窑: 烘干中 ({len(trays)}托)")
-        else:
-            lines.append(f"{k}窑: 入窑中 ({len(trays)}托)")
-
-    lines.append(f"\n运行中: {running} 个")
-
-    return "\n".join(lines)
+    from modules.kiln.kiln_view import build_kiln_overview
+    return build_kiln_overview(title="🔥 窑概况", include_footer=True, footer_style="two_lines")
 
 
 # =====================================================
@@ -152,63 +74,32 @@ def factory_report():
 # =====================================================
 
 def dashboard():
-
-    inv = load_json(INVENTORY_FILE)
-
-    raw_total = sum(inv.get("raw", {}).values()) if isinstance(inv.get("raw"), dict) else 0
-    try:
-        from modules.utils.wip_calc import compute_wip_units
-        w = compute_wip_units()
-        wip_saw = int(w.get("wip_saw_tray", 0) or 0)
-        wip_kiln = int(w.get("wip_kiln_tray", 0) or 0)
-    except Exception:
-        wip_saw = 0
-        wip_kiln = 0
-
-    prod_count = 0
-    prod_volume = 0
-
-    for item in inv.get("product", {}).values():
-
-        if not isinstance(item, dict):
-            continue
-
-        if item.get("status") != "库存":
-            continue
-
-        prod_count += 1
-        prod_volume += item.get("volume", 0)
-
-    finance = load_json(FINANCE_FILE)
-
-    income, expense = finance_totals(finance)
-    balance = income - expense
-
-    kiln = load_json(KILN_FILE)
-
-    running_kilns = 0
-
-    for v in kiln.values():
-        if v.get("status") == "drying":
-            running_kilns += 1
-
+    s = get_stock_data("zh")
     lines = [
         "🏭 工厂状态",
+        f"原木库存: {float(s.get('log_stock', 0.0)):.4f} MT",
+        f"当前锯解库存: {int(s.get('saw_stock', 0) or 0)} 托",
+        f"当前药浸库存: {int(s.get('dip_stock', 0) or 0)} 托",
+        f"待入窑库存: {int(s.get('sorting_stock', 0) or 0)} 窑托",
+        f"窑完成库存: {int(s.get('kiln_done_stock', 0) or 0)} 窑托",
+        f"成品库存: {int(s.get('product_count', 0) or 0)} 件（{float(s.get('product_m3', 0.0)):.2f} m³）",
+        f"当前树皮库存: {float(s.get('bark_stock_m3', 0.0)):.2f} 立方",
+        f"当前木渣库存: {int(s.get('dust_bag_stock', 0) or 0)} 袋",
         "",
-        "💰 财务",
-        f"净额: {balance:.2f} KS",
-        "",
-        "📦 库存",
-        f"原料: {raw_total}",
-        f"在制(锯解托): {wip_saw}托",
-        f"在制(入窑托): {wip_kiln}托",
-        f"成品件数: {prod_count}",
-        f"成品体积: {prod_volume:.2f} m³",
-        "",
-        "🔥 烘房",
-        f"运行中: {running_kilns} 个",
+        "🔥 窑状态",
     ]
-
+    running = 0
+    for kid in ("A", "B", "C", "D"):
+        info = s.get("kiln_status", {}).get(kid, {}) if isinstance(s.get("kiln_status", {}), dict) else {}
+        status_display = str(info.get("status_display", "空") or "空")
+        progress = str(info.get("progress", "") or "")
+        if str(info.get("status", "") or "") in ("loading", "drying", "unloading"):
+            running += 1
+        line = f"{kid} 窑: {status_display}"
+        if progress:
+            line += f" - {progress}"
+        lines.append(line)
+    lines.extend(["", f"运行中: {running} 窑"])
     return "\n".join(lines)
 
 
@@ -220,7 +111,7 @@ def handle_report(text):
 
     # -------- 老板驾驶舱 --------
 
-    if text in ("工厂状态", "今日汇总", "驾驶舱"):
+    if text in ("工厂状态", "今日汇总", "驾驶舱", "工厂概况"):
         return dashboard()
 
     # -------- 管理报表 --------
@@ -231,13 +122,13 @@ def handle_report(text):
     if text in ("财务概况", "财务报告"):
         return finance_report()
 
-    if text in ("生产概况", "生产报告"):
+    if text in ("生产概况", "生产报告", "生产状况"):
         return production_report()
 
-    if text in ("库存概况", "库存报告"):
+    if text in ("库存概况", "库存报告", "库存状况"):
         return inventory_report()
 
-    if text in ("窑概况", "窑报告"):
+    if text in ("窑概况", "窑报告", "窑状况"):
         return kiln_report()
 
     return None

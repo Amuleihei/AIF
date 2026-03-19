@@ -54,7 +54,15 @@ COMMAND_MAP = {
 
     # ================= 人事 =================
 
+    "hr": "HR帮助",
+    "human": "HR帮助",
+    "attendance": "考勤",
+    "ot": "考勤",
     "staff": "员工列表",
+    "employee": "员工列表",
+    "employees": "员工列表",
     "payroll": "工资表",
+    "salary": "工资试算",
+    "wage": "工资试算",
 
 }

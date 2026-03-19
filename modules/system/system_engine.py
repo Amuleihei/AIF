@@ -1,65 +1,129 @@
-import json
-import shutil
-from datetime import datetime
-from pathlib import Path
-
-
-DATA_DIR = Path.home() / "AIF/data"
-SYSTEM_FILE = DATA_DIR / "system/system.json"
-BACKUP_DIR = Path.home() / "AIF/backups"
-TG_LOG = Path.home() / "AIF/logs/tg_bot.log"
+from web.data_store import get_kilns_data, get_shipping_data
+from web.models import Session, TgSetting
+from modules.auth.auth_engine import load as load_auth_users
 
 
 DEFAULT = {
-    "lang_policy": {
-        "default": "my",
-        "by_user": {},
-    },
-    "backup": {
-        "enabled": True,
-        "schedule": "daily",
-        "keep": 7,
-    },
-    "entry_rule": {
-        "allow_negative": False,
-        "amount_decimals": 2,
-        "quantity_decimals": 3,
-        "expense_note_required": False,
-    },
-    "audit": {
-        "enabled": True,
-    },
+    "lang_policy": {"default": "my", "by_user": {}},
+    "backup": {"enabled": True, "schedule": "daily", "keep": 7},
+    "entry_rule": {"allow_negative": False, "amount_decimals": 2, "quantity_decimals": 3, "expense_note_required": False},
+    "audit": {"enabled": True},
 }
 
 
-def _load():
-    if not SYSTEM_FILE.exists():
-        _save(DEFAULT.copy())
-        return DEFAULT.copy()
-    try:
-        d = json.load(open(SYSTEM_FILE, "r", encoding="utf-8"))
-        if not isinstance(d, dict):
-            d = {}
-    except Exception:
-        d = {}
-
-    merged = DEFAULT.copy()
-    for k, v in DEFAULT.items():
-        cur = d.get(k, {})
-        if isinstance(v, dict) and isinstance(cur, dict):
-            m = v.copy()
-            m.update(cur)
-            merged[k] = m
+def _merge_dict(base: dict, current: dict) -> dict:
+    merged = {}
+    for key, value in base.items():
+        cur = current.get(key)
+        if isinstance(value, dict) and isinstance(cur, dict):
+            merged[key] = _merge_dict(value, cur)
         else:
-            merged[k] = cur if cur is not None else v
-    _save(merged)
+            merged[key] = cur if cur is not None else value
     return merged
 
 
-def _save(d):
-    SYSTEM_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(SYSTEM_FILE, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+def _load():
+    session = Session()
+    try:
+        current = {
+            "lang_policy": {"default": "my", "by_user": {}},
+            "backup": {},
+            "entry_rule": {},
+            "audit": {},
+        }
+        rows = session.query(TgSetting).all()
+        for row in rows:
+            key = str(row.key or "")
+            value = str(row.value or "")
+            if key == "lang_default":
+                current["lang_policy"]["default"] = value or "my"
+            elif key.startswith("lang_user:"):
+                uid = key.split(":", 1)[1].strip()
+                if uid:
+                    current["lang_policy"]["by_user"][uid] = value or "my"
+            elif key == "backup_enabled":
+                current["backup"]["enabled"] = value == "1"
+            elif key == "backup_schedule":
+                current["backup"]["schedule"] = value or "daily"
+            elif key == "backup_keep":
+                try:
+                    current["backup"]["keep"] = int(value)
+                except Exception:
+                    pass
+            elif key == "entry_allow_negative":
+                current["entry_rule"]["allow_negative"] = value == "1"
+            elif key == "entry_amount_decimals":
+                try:
+                    current["entry_rule"]["amount_decimals"] = int(value)
+                except Exception:
+                    pass
+            elif key == "entry_quantity_decimals":
+                try:
+                    current["entry_rule"]["quantity_decimals"] = int(value)
+                except Exception:
+                    pass
+            elif key == "entry_expense_note_required":
+                current["entry_rule"]["expense_note_required"] = value == "1"
+            elif key == "audit_enabled":
+                current["audit"]["enabled"] = value == "1"
+        return _merge_dict(DEFAULT, current)
+    except Exception:
+        return DEFAULT.copy()
+    finally:
+        session.close()
+
+
+def _save(data: dict):
+    merged = _merge_dict(DEFAULT, data if isinstance(data, dict) else {})
+    session = Session()
+    try:
+        keep_keys = {"lang_default"}
+        lang_default = str(merged.get("lang_policy", {}).get("default", "my") or "my")
+        row = session.query(TgSetting).filter_by(key="lang_default").first()
+        if not row:
+            session.add(TgSetting(key="lang_default", value=lang_default))
+        else:
+            row.value = lang_default
+
+        by_user = merged.get("lang_policy", {}).get("by_user", {})
+        if isinstance(by_user, dict):
+            for uid, lang in by_user.items():
+                uid_str = str(uid).strip()
+                if not uid_str:
+                    continue
+                key = f"lang_user:{uid_str}"
+                keep_keys.add(key)
+                ur = session.query(TgSetting).filter_by(key=key).first()
+                if not ur:
+                    session.add(TgSetting(key=key, value=str(lang or "my")))
+                else:
+                    ur.value = str(lang or "my")
+
+        scalar_map = {
+            "backup_enabled": "1" if merged["backup"].get("enabled") else "0",
+            "backup_schedule": str(merged["backup"].get("schedule", "daily") or "daily"),
+            "backup_keep": str(int(merged["backup"].get("keep", 7) or 7)),
+            "entry_allow_negative": "1" if merged["entry_rule"].get("allow_negative") else "0",
+            "entry_amount_decimals": str(int(merged["entry_rule"].get("amount_decimals", 2) or 2)),
+            "entry_quantity_decimals": str(int(merged["entry_rule"].get("quantity_decimals", 3) or 3)),
+            "entry_expense_note_required": "1" if merged["entry_rule"].get("expense_note_required") else "0",
+            "audit_enabled": "1" if merged["audit"].get("enabled") else "0",
+        }
+        for key, value in scalar_map.items():
+            keep_keys.add(key)
+            sr = session.query(TgSetting).filter_by(key=key).first()
+            if not sr:
+                session.add(TgSetting(key=key, value=value))
+            else:
+                sr.value = value
+
+        for row in session.query(TgSetting).all():
+            key = str(row.key or "")
+            if (key.startswith("lang_user:") or key in scalar_map or key == "lang_default") and key not in keep_keys:
+                session.delete(row)
+        session.commit()
+    finally:
+        session.close()
 
 
 def _bool_cn(v: str):
@@ -82,55 +146,36 @@ def _lang_norm(v: str):
     return None
 
 
-def _settings_report(d):
-    return (
-        "⚙️ 系统设置\n"
-        f"语言默认: {d['lang_policy'].get('default', 'my')}\n"
-        f"备份: {'开' if d['backup'].get('enabled') else '关'} / 频率 {d['backup'].get('schedule')} / 保留 {d['backup'].get('keep')} 份\n"
-        f"录入规则: 负数{'允许' if d['entry_rule'].get('allow_negative') else '不允许'} | 金额小数{d['entry_rule'].get('amount_decimals')}位 | 数量小数{d['entry_rule'].get('quantity_decimals')}位\n"
-        f"审计: {'开' if d['audit'].get('enabled') else '关'}\n"
-        "打印: 已取消"
-    )
-
-
-def _backup_now():
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dst = BACKUP_DIR / f"data_{stamp}"
-    shutil.copytree(DATA_DIR, dst)
-    return dst
-
-
-def _prune_backups(keep: int):
-    if not BACKUP_DIR.exists():
-        return
-    dirs = sorted([p for p in BACKUP_DIR.iterdir() if p.is_dir() and p.name.startswith("data_")])
-    extra = len(dirs) - max(1, keep)
-    for p in dirs[:max(0, extra)]:
-        shutil.rmtree(p, ignore_errors=True)
-
-
-def _audit_recent(n: int):
-    if not TG_LOG.exists():
-        return "🧾 审计记录为空"
-    try:
-        lines = open(TG_LOG, "r", encoding="utf-8", errors="ignore").read().splitlines()
-    except Exception:
-        return "❌ 审计读取失败"
-    rows = [x for x in lines if "MSG from " in x]
-    if not rows:
-        return "🧾 审计记录为空"
-    pick = rows[-max(1, n):]
-    return "🧾 最近操作\n" + "\n".join(pick)
-
-
 def handle_system(text: str):
     t = text.strip()
     d = _load()
     parts = t.split()
 
+    if t in ("系统状态", "系统健康", "状态"):
+        users = load_auth_users().get("users", {})
+        kilns = get_kilns_data()
+        shipping = get_shipping_data().get("shipments", [])
+        running = 0
+        for kid in ("A", "B", "C", "D"):
+            k = kilns.get(kid, {}) if isinstance(kilns, dict) else {}
+            if str(k.get("status", "") or "") in ("loading", "drying", "unloading"):
+                running += 1
+        return (
+            "🟢 系统状态\n"
+            f"默认语言: {d['lang_policy'].get('default', 'zh')}\n"
+            f"用户数: {len(users) if isinstance(users, dict) else 0}\n"
+            f"运行中窑: {running}\n"
+            f"发货单: {len(shipping) if isinstance(shipping, list) else 0}"
+        )
+
     if t in ("系统设置", "设置总览"):
-        return _settings_report(d)
+        return (
+            "⚙️ 系统设置\n"
+            f"语言默认: {d['lang_policy'].get('default', 'my')}\n"
+            f"备份: {'开' if d['backup'].get('enabled') else '关'} / 频率 {d['backup'].get('schedule')} / 保留 {d['backup'].get('keep')} 份\n"
+            f"录入规则: 负数{'允许' if d['entry_rule'].get('allow_negative') else '不允许'} | 金额小数{d['entry_rule'].get('amount_decimals')}位 | 数量小数{d['entry_rule'].get('quantity_decimals')}位\n"
+            f"审计: {'开' if d['audit'].get('enabled') else '关'}"
+        )
 
     if t in ("语言设置", "查看语言"):
         user_count = len(d["lang_policy"].get("by_user", {}))
@@ -156,12 +201,7 @@ def handle_system(text: str):
 
     if t in ("备份设置",):
         b = d["backup"]
-        return (
-            "🧷 备份设置\n"
-            f"开关: {'开' if b.get('enabled') else '关'}\n"
-            f"频率: {b.get('schedule')}\n"
-            f"保留: {b.get('keep')} 份"
-        )
+        return f"🧷 备份设置\n开关: {'开' if b.get('enabled') else '关'}\n频率: {b.get('schedule')}\n保留: {b.get('keep')} 份"
 
     if len(parts) >= 3 and parts[0] == "设置备份" and parts[1] in ("开关", "状态"):
         v = _bool_cn(parts[2])
@@ -172,7 +212,6 @@ def handle_system(text: str):
         return f"✅ 备份已{'开启' if v else '关闭'}"
 
     if len(parts) >= 2 and parts[0] == "设置备份":
-        # 兼容：设置备份 开 / 设置备份 关
         v = _bool_cn(parts[1])
         if v is not None:
             d["backup"]["enabled"] = v
@@ -196,13 +235,7 @@ def handle_system(text: str):
             return "❌ 份数必须大于0"
         d["backup"]["keep"] = keep
         _save(d)
-        _prune_backups(keep)
         return f"✅ 备份保留已设置: {keep} 份"
-
-    if t in ("立即备份", "执行备份"):
-        dst = _backup_now()
-        _prune_backups(int(d["backup"].get("keep", 7)))
-        return f"✅ 备份完成: {dst}"
 
     if t in ("录入规则", "查看录入规则"):
         r = d["entry_rule"]
@@ -219,9 +252,9 @@ def handle_system(text: str):
         try:
             digits = int(parts[3])
         except Exception:
-            return "❌ 小数位必须是数字"
-        if digits < 0 or digits > 6:
-            return "❌ 小数位范围: 0-6"
+            return "❌ 用法: 设置录入规则 小数 金额|数量 位数"
+        if digits < 0:
+            return "❌ 位数不能小于0"
         if target == "金额":
             d["entry_rule"]["amount_decimals"] = digits
         elif target == "数量":
@@ -230,50 +263,5 @@ def handle_system(text: str):
             return "❌ 仅支持: 金额/数量"
         _save(d)
         return f"✅ {target}小数位已设置: {digits}"
-
-    if len(parts) >= 3 and parts[0] == "设置录入规则" and parts[1] == "允许负数":
-        v = _bool_cn(parts[2])
-        if v is None:
-            return "❌ 用法: 设置录入规则 允许负数 开|关"
-        d["entry_rule"]["allow_negative"] = v
-        _save(d)
-        return f"✅ 允许负数已{'开启' if v else '关闭'}"
-
-    if len(parts) >= 3 and parts[0] == "设置录入规则" and parts[1] == "支出备注必填":
-        v = _bool_cn(parts[2])
-        if v is None:
-            return "❌ 用法: 设置录入规则 支出备注必填 开|关"
-        d["entry_rule"]["expense_note_required"] = v
-        _save(d)
-        return f"✅ 支出备注必填已{'开启' if v else '关闭'}"
-
-    if t in ("审计设置",):
-        return f"🧾 审计设置\n状态: {'开' if d['audit'].get('enabled') else '关'}"
-
-    if len(parts) >= 2 and parts[0] == "审计开关":
-        v = _bool_cn(parts[1])
-        if v is None:
-            return "❌ 用法: 审计开关 开|关"
-        d["audit"]["enabled"] = v
-        _save(d)
-        return f"✅ 审计已{'开启' if v else '关闭'}"
-
-    if parts and parts[0] == "审计":
-        n = 20
-        if len(parts) >= 3 and parts[1] in ("最近", "last"):
-            try:
-                n = int(parts[2])
-            except Exception:
-                return "❌ 用法: 审计 最近 条数"
-        if not d["audit"].get("enabled"):
-            return "⛔ 审计已关闭"
-        return _audit_recent(n)
-
-    if t in ("导出数据",):
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = BACKUP_DIR / f"export_{stamp}"
-        zip_path = shutil.make_archive(str(out), "zip", str(DATA_DIR))
-        return f"✅ 数据导出完成: {zip_path}"
 
     return None

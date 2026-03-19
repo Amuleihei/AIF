@@ -1,19 +1,4 @@
-import json
-from pathlib import Path
-
-
-DATA = Path.home() / "AIF/data"
-FLOW_FILE = DATA / "process_flow/flow.json"
-KILN_FILE = DATA / "kiln/kilns.json"
-
-
-def _load_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.load(open(path))
-    except Exception:
-        return {}
+from web.data_store import get_flow_data, get_kilns_data
 
 
 def compute_wip_trays() -> tuple[int, dict]:
@@ -25,8 +10,8 @@ def compute_wip_trays() -> tuple[int, dict]:
 
     默认 total_trays 不包含“出窑待二拣”，因为通常会单独展示该字段。
     """
-    flow = _load_json(FLOW_FILE)
-    kiln = _load_json(KILN_FILE)
+    flow = get_flow_data()
+    kiln = get_kilns_data()
 
     def _int(v) -> int:
         try:

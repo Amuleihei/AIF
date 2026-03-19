@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from web.data_store import get_kilns_data, save_kilns_data
 
 
 DATA_FILE = Path.home() / "AIF/data/kiln/kilns.json"
@@ -23,14 +24,10 @@ def default_data():
 # =====================================================
 
 def load_data():
-
-    if not DATA_FILE.exists():
-        data = default_data()
-        save_data(data)
-        return data
-
     try:
-        d = json.load(open(DATA_FILE))
+        d = get_kilns_data()
+        if not isinstance(d, dict) or not d:
+            d = default_data()
         changed = False
         for k in ("A", "B", "C", "D"):
             d.setdefault(k, default_data()[k])
@@ -90,8 +87,4 @@ def load_data():
 # =====================================================
 
 def save_data(data):
-
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    save_kilns_data(data)

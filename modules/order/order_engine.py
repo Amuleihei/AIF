@@ -1,9 +1,10 @@
-import json
 from pathlib import Path
 from datetime import datetime
+from modules.storage.db_doc_store import load_doc, save_doc
 
 
 DATA_FILE = Path.home() / "AIF/data/order/orders.json"
+DOC_KEY = "order_orders_v1"
 
 
 # =====================================================
@@ -22,26 +23,11 @@ def default_data():
 # =====================================================
 
 def load():
-
-    if not DATA_FILE.exists():
-        d = default_data()
-        save(d)
-        return d
-
-    try:
-        return json.load(open(DATA_FILE))
-    except Exception:
-        d = default_data()
-        save(d)
-        return d
+    return load_doc(DOC_KEY, default_data(), legacy_file=DATA_FILE)
 
 
 def save(d):
-
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    save_doc(DOC_KEY, d)
 
 
 # =====================================================

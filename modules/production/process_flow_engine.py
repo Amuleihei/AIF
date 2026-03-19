@@ -1,27 +1,26 @@
 # modules/production/process_flow_engine.py
 
-import json
 from pathlib import Path
+from modules.storage.db_doc_store import load_doc, save_doc
 
 DATA = Path("data/production/process_flow.json")
+DOC_KEY = "production_process_flow_v1"
 
 
 # ================= 数据读写 =================
 
 def load():
-    if not DATA.exists():
-        return {
-            "原木库存": 0.0,
-            "锯解完成": 0.0,
-            "烘干完成": 0.0,
-            "包装完成": 0.0
-        }
-    return json.load(open(DATA))
+    default = {
+        "原木库存": 0.0,
+        "锯解完成": 0.0,
+        "烘干完成": 0.0,
+        "包装完成": 0.0
+    }
+    return load_doc(DOC_KEY, default, legacy_file=DATA)
 
 
 def save(d):
-    DATA.parent.mkdir(parents=True, exist_ok=True)
-    json.dump(d, open(DATA, "w"), indent=2, ensure_ascii=False)
+    save_doc(DOC_KEY, d)
 
 
 # ================= TG入口 =================

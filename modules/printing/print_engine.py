@@ -4,28 +4,23 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from modules.storage.db_doc_store import load_doc, save_doc
 
 
 CONFIG_FILE = Path.home() / "AIF/data/system/printer.json"
+DOC_KEY = "system_printer_v1"
 
 
 def _load_cfg() -> dict:
-    if not CONFIG_FILE.exists():
-        return {"default_printer": ""}
-    try:
-        d = json.load(open(CONFIG_FILE, "r", encoding="utf-8"))
-        if not isinstance(d, dict):
-            return {"default_printer": ""}
-        d.setdefault("default_printer", "")
-        return d
-    except Exception:
-        return {"default_printer": ""}
+    d = load_doc(DOC_KEY, {"default_printer": ""}, legacy_file=CONFIG_FILE)
+    if not isinstance(d, dict):
+        d = {"default_printer": ""}
+    d.setdefault("default_printer", "")
+    return d
 
 
 def _save_cfg(cfg: dict) -> None:
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    save_doc(DOC_KEY, cfg if isinstance(cfg, dict) else {"default_printer": ""})
 
 
 def _has_lp() -> bool:

@@ -13,3 +13,7 @@ def get_bot_token() -> str:
 
 def get_bot_chat_id() -> str:
     return _required_env("BOT_CHAT_ID")
+
+
+def get_miniapp_url() -> str:
+    return os.getenv("TG_MINIAPP_URL", "").strip()

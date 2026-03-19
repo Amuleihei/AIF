@@ -1,10 +1,12 @@
-import json
 from pathlib import Path
 from datetime import datetime
+from modules.storage.db_doc_store import load_doc, save_doc
 
 
 ORDER_FILE = Path.home() / "AIF/data/order/orders.json"
 PLAN_FILE = Path.home() / "AIF/data/planning/plans.json"
+ORDER_KEY = "order_orders_v1"
+PLAN_KEY = "planning_plans_v1"
 
 
 # =====================================================
@@ -20,26 +22,13 @@ def default_plan():
 # =====================================================
 
 def load_json(p, default):
-
-    if not p.exists():
-        d = default()
-        save_json(p, d)
-        return d
-
-    try:
-        return json.load(open(p))
-    except Exception:
-        d = default()
-        save_json(p, d)
-        return d
+    key = ORDER_KEY if Path(p) == ORDER_FILE else PLAN_KEY
+    return load_doc(key, default(), legacy_file=p)
 
 
 def save_json(p, d):
-
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(p, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    key = ORDER_KEY if Path(p) == ORDER_FILE else PLAN_KEY
+    save_doc(key, d)
 
 
 # =====================================================

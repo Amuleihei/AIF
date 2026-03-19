@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 from datetime import datetime
+from web.data_store import get_inventory_data, save_inventory_data
 
 DATA_FILE = Path.home() / "AIF/data/inventory/inventory.json"
 GRADE_SEP = "#"
@@ -99,28 +100,17 @@ def _set_last_product_in(meta: dict, ids: list[str], action: str = "create") -> 
 
 
 def load():
-
-    if not DATA_FILE.exists():
-        d = DEFAULT.copy()
-        save(d)
-        return d
-
     try:
-        d = json.load(open(DATA_FILE))
+        d = get_inventory_data()
     except Exception:
         d = DEFAULT.copy()
-
     d = ensure_structure(d)
     save(d)
     return d
 
 
 def save(d):
-
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    save_inventory_data(d)
 
 
 def sync_ledger(delta: dict):

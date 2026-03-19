@@ -1,10 +1,12 @@
-import json
 from pathlib import Path
 from datetime import datetime
+from modules.storage.db_doc_store import load_doc, save_doc
 
 
 PACK_FILE = Path.home() / "AIF/data/packing/pallets.json"
 SHIP_FILE = Path.home() / "AIF/data/shipping/shipping.json"
+PACK_KEY = "packing_pallets_v1"
+SHIP_KEY = "shipping_records_v1"
 
 
 # =====================================================
@@ -20,26 +22,13 @@ def default_ship():
 # =====================================================
 
 def load_json(p, default):
-
-    if not p.exists():
-        d = default()
-        save_json(p, d)
-        return d
-
-    try:
-        return json.load(open(p))
-    except:
-        d = default()
-        save_json(p, d)
-        return d
+    key = PACK_KEY if Path(p) == PACK_FILE else SHIP_KEY
+    return load_doc(key, default(), legacy_file=p)
 
 
 def save_json(p, d):
-
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(p, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    key = PACK_KEY if Path(p) == PACK_FILE else SHIP_KEY
+    save_doc(key, d)
 
 
 # =====================================================

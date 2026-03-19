@@ -1,15 +1,14 @@
-import json
 from pathlib import Path
 from datetime import datetime
+from modules.storage.db_doc_store import append_list_item
 
 
 DATA_FILE = Path.home() / "AIF/data/kiln/unload_events.jsonl"
+DOC_KEY = "kiln_unload_events_v1"
 
 
 def _append_jsonl(obj: dict) -> None:
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    append_list_item(DOC_KEY, obj, legacy_file=DATA_FILE)
 
 
 def log_unload_event(
@@ -52,4 +51,3 @@ def log_unload_event(
     except Exception:
         # logging failure must never break production commands
         return
-

@@ -5,7 +5,7 @@ from datetime import datetime
 from send_daily_report import send_report
 
 
-SEND_HOUR = 8      # 早上8点发送
+SEND_HOUR = 20     # 晚上8点发送
 CHECK_INTERVAL = 60   # 每分钟检查一次
 
 

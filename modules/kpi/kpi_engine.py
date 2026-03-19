@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+from modules.storage.db_doc_store import load_doc
 
 
 DATA = Path.home() / "AIF/data"
@@ -15,14 +15,17 @@ HR_FILE = DATA / "hr/hr.json"
 # =====================================================
 
 def load(p):
-
-    if not p.exists():
+    path = Path(p)
+    mapping = {
+        str(DATA / "finance/finance.json"): "finance_finance_v1",
+        str(DATA / "equipment/equipment.json"): "equipment_v1",
+        str(DATA / "hr/hr.json"): "hr_main_v2",
+        str(DATA / "inventory/inventory.json"): "inventory_data_v1",
+    }
+    key = mapping.get(str(path))
+    if not key:
         return {}
-
-    try:
-        return json.load(open(p))
-    except:
-        return {}
+    return load_doc(key, {}, legacy_file=path)
 
 
 # =====================================================
@@ -32,7 +35,11 @@ def load(p):
 def production_kpi():
 
     # 使用真实数据源（inventory + 台账），避免 production.json 未维护导致 KPI 为 0
-    inv = load(DATA / "inventory/inventory.json")
+    try:
+        from modules.inventory.inventory_engine import load as load_inventory
+        inv = load_inventory()
+    except Exception:
+        inv = {}
     raw_total = sum(inv.get("raw", {}).values()) if isinstance(inv.get("raw"), dict) else 0.0
 
     prod_count = 0

@@ -2,6 +2,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from web.data_store import get_flow_data, save_flow_data
 
 
 DATA_FILE = Path.home() / "AIF/data/process_flow/flow.json"
@@ -275,14 +276,8 @@ def _single_saw_report(d, saw_no: int):
 
 
 def load():
-    if not DATA_FILE.exists():
-        d = DEFAULT.copy()
-        d["selected_trays"] = {}
-        save(d)
-        return d
-
     try:
-        d = json.load(open(DATA_FILE))
+        d = get_flow_data()
     except Exception:
         d = {}
 
@@ -318,9 +313,7 @@ def load():
 
 def save(d):
     _sync_pool_count(d)
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_FILE, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    save_flow_data(d)
 
 
 def reserve_selected_trays(count: int):

@@ -31,3 +31,8 @@ xmrig.mac/
 test_*.txt
 
 .env.example
+
+# local assets not for cloud
+*.xlsx
+logo.png
+**/logo.png

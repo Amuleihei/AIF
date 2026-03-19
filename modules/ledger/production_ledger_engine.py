@@ -2,9 +2,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 from copy import deepcopy
+from modules.storage.db_doc_store import load_doc, save_doc
 
 
 DATA_FILE = Path.home() / "AIF/data/ledger/production_ledger.json"
+DOC_KEY = "ledger_production_v1"
+UNLOAD_EVENTS_KEY = "kiln_unload_events_v1"
 
 
 # =====================================================
@@ -61,31 +64,24 @@ def today():
 
 
 def load():
-    if not DATA_FILE.exists():
-        save({})
-        return {}
-    try:
-        d = json.load(open(DATA_FILE))
-        changed = False
-        for day, rec in d.items():
-            if not isinstance(rec, dict):
-                continue
-            for k, v in DEFAULT_DAY.items():
-                if k not in rec:
-                    rec[k] = v
-                    changed = True
-        if changed:
-            save(d)
-        return d
-    except:
-        save({})
-        return {}
+    d = load_doc(DOC_KEY, {}, legacy_file=DATA_FILE)
+    if not isinstance(d, dict):
+        d = {}
+    changed = False
+    for _day, rec in d.items():
+        if not isinstance(rec, dict):
+            continue
+        for k, v in DEFAULT_DAY.items():
+            if k not in rec:
+                rec[k] = v
+                changed = True
+    if changed:
+        save(d)
+    return d
 
 
 def save(d):
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_FILE, "w") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    save_doc(DOC_KEY, d if isinstance(d, dict) else {})
 
 
 def ensure_day(d, day):
@@ -245,38 +241,31 @@ def _sum_kiln_unload_events_daily(day: str) -> dict:
     This is the only reliable way to rebuild 'kiln_out_tray' when unloading spans multiple days.
     """
     try:
-        events_file = Path.home() / "AIF/data/kiln/unload_events.jsonl"
-        if not events_file.exists():
-            return {}
+        legacy = Path.home() / "AIF/data/kiln/unload_events.jsonl"
+        events = load_doc(UNLOAD_EVENTS_KEY, [], legacy_file=legacy)
+        if not isinstance(events, list):
+            events = []
         trays = 0
         m3 = 0.0
         m3_known = False
         found = 0
-        with open(events_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = (line or "").strip()
-                if not line:
-                    continue
+        for obj in events:
+            if not isinstance(obj, dict):
+                continue
+            t = obj.get("time")
+            if not isinstance(t, str) or not t.startswith(day):
+                continue
+            found += 1
+            try:
+                trays += int(obj.get("trays", 0) or 0)
+            except Exception:
+                pass
+            if "m3" in obj:
                 try:
-                    obj = json.loads(line)
-                except Exception:
-                    continue
-                if not isinstance(obj, dict):
-                    continue
-                t = obj.get("time")
-                if not isinstance(t, str) or not t.startswith(day):
-                    continue
-                found += 1
-                try:
-                    trays += int(obj.get("trays", 0) or 0)
+                    m3 += float(obj.get("m3", 0) or 0.0)
+                    m3_known = True
                 except Exception:
                     pass
-                if "m3" in obj:
-                    try:
-                        m3 += float(obj.get("m3", 0) or 0.0)
-                        m3_known = True
-                    except Exception:
-                        pass
         if found == 0:
             return {}
 
