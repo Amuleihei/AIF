@@ -595,14 +595,15 @@ def _build_label_sheet(workbook: Workbook, rows: list, logo_path: Path):
                 item = chunk[i]
                 code = item.get("编号", "")
                 spec = item.get("规格", "")
+                grade = str(item.get("等级", "") or item.get("grade", "") or "").strip().upper()
                 qty = item.get("数量", 0)
                 cbm = item.get("m³", 0.0)
                 sheet.cell(r0 + 1, c0).value = f"CODE NO: {code}"
-                sheet.cell(r0 + 2, c0).value = f"SIZE: {spec}"
+                sheet.cell(r0 + 2, c0).value = f"SIZE: {spec}    GRADE: {grade}"
                 sheet.cell(r0 + 3, c0).value = f"PCS: {qty}    CBM: {cbm:.4f}    KG: ______"
             else:
                 sheet.cell(r0 + 1, c0).value = "CODE NO: ____________"
-                sheet.cell(r0 + 2, c0).value = "SIZE: ____________"
+                sheet.cell(r0 + 2, c0).value = "SIZE: ____________    GRADE: ____"
                 sheet.cell(r0 + 3, c0).value = "PCS: ____    CBM: ____    KG: ____"
             sheet.cell(r0 + 4, c0).value = "QC SIGN: ____________"
 
@@ -669,9 +670,9 @@ def _ensure_template_logos(ws, logo_path: Path):
 def _underlined_chars(value: str) -> str:
     raw = str(value or "")
     if raw:
-        text = f"  {raw}  "
+        text = f" {raw} "
     else:
-        text = "    "
+        text = "  "
     if not text:
         return ""
     return "".join(f"{ch}\u0332" for ch in text)
@@ -692,6 +693,7 @@ def _fill_template_label_sheet(ws, rows: list):
         item = rows[idx] if idx < len(rows) else {}
         code = str(item.get("编号", "") or "")
         spec = _format_spec_dwl(str(item.get("规格", "") or ""))
+        grade = str(item.get("等级", "") or item.get("grade", "") or "").strip().upper()
         qty = item.get("数量", 0) or 0
         cbm = float(item.get("m³", 0.0) or 0.0)
         date_text = datetime.now().strftime("%Y-%m-%d")
@@ -699,23 +701,27 @@ def _fill_template_label_sheet(ws, rows: list):
         top_cell = ws[f"{text_col}{start_row}"]
         code_cell = ws[f"{logo_col}{start_row + 1}"]
         size_cell = ws[f"{logo_col}{start_row + 2}"]
+        grade_cell = ws[f"{text_col}{start_row + 2}"]
         pcs_cell = ws[f"{logo_col}{start_row + 3}"]
         qc_cell = ws[f"{logo_col}{start_row + 4}"]
 
-        top_cell.value = f"  DATE {_underlined_chars(date_text)}"
-        code_cell.value = f"CODE NO {_underlined_chars(code)}"
-        size_cell.value = f"SIZE {_underlined_chars(spec)}"
-        pcs_cell.value = f"PCS {_underlined_chars(str(qty))}  CBM {_underlined_chars(f'{cbm:.4f}')}  KG ______"
-        qc_cell.value = "QC SIGN ________________"
+        top_cell.value = f"DATE:{_underlined_chars(date_text)}"
+        code_cell.value = f"CODE NO:{_underlined_chars(code)}"
+        size_cell.value = f"SIZE:{_underlined_chars(spec)}"
+        grade_cell.value = f"GRADE:{_underlined_chars(grade)}"
+        pcs_cell.value = f"PCS:{_underlined_chars(str(qty))}  CBM:{_underlined_chars(f'{cbm:.4f}')}  KG:{_underlined_chars('')}"
+        qc_cell.value = f"QC SIGN:{_underlined_chars('')}"
 
         top_cell.font = top_cell.font.copy(sz=13)
         code_cell.font = code_cell.font.copy(sz=13)
         size_cell.font = size_cell.font.copy(sz=13)
+        grade_cell.font = grade_cell.font.copy(sz=13)
         pcs_cell.font = pcs_cell.font.copy(sz=13)
         qc_cell.font = qc_cell.font.copy(sz=13)
         top_cell.alignment = top_cell.alignment.copy(horizontal="left", vertical="center")
         code_cell.alignment = code_cell.alignment.copy(horizontal="left", vertical="center")
         size_cell.alignment = size_cell.alignment.copy(horizontal="left", vertical="center")
+        grade_cell.alignment = grade_cell.alignment.copy(horizontal="left", vertical="center")
         pcs_cell.alignment = pcs_cell.alignment.copy(horizontal="left", vertical="center")
         qc_cell.alignment = qc_cell.alignment.copy(horizontal="left", vertical="center")
 

@@ -28,6 +28,7 @@ from web.templates_admin import (
 )
 from modules.hr.hr_engine import (
     add_hr_attendance_from_admin,
+    apply_hr_attendance_batch_from_admin,
     add_hr_employee_from_admin,
     get_hr_admin_payload,
     get_hr_employees_payload,
@@ -193,12 +194,23 @@ def register_auth_admin_routes(app, translate):
                 "锯工组": "saw_team",
                 "saw team": "saw_team",
                 "sawing team": "saw_team",
+                "药浸&烘干组": "dip_kiln_team",
+                "dip & kiln team": "dip_kiln_team",
+                "dip and kiln team": "dip_kiln_team",
+                "采购组": "procurement_team",
+                "procurement team": "procurement_team",
+                "设备保障": "maintenance_team",
+                "maintenance": "maintenance_team",
+                "安保组": "security_team",
+                "security team": "security_team",
                 "窑工组": "kiln_team",
                 "kiln team": "kiln_team",
                 "拣选组": "sorting_team",
                 "sorting team": "sorting_team",
                 "物流组": "logistics_team",
                 "logistics team": "logistics_team",
+                "未分组": "unassigned_team",
+                "unassigned": "unassigned_team",
             },
             "position": {
                 "财务": "finance",
@@ -218,6 +230,30 @@ def register_auth_admin_routes(app, translate):
                 "shipper": "shipper",
                 "仓管": "warehouse_keeper",
                 "warehouse keeper": "warehouse_keeper",
+                "副锯工": "assistant_sawyer",
+                "assistant sawyer": "assistant_sawyer",
+                "锯工qc": "saw_qc",
+                "saw qc": "saw_qc",
+                "药浸烘干控制(同岗)": "dip_kiln_controller",
+                "dip kiln controller": "dip_kiln_controller",
+                "锅炉工": "boiler_operator",
+                "boiler operator": "boiler_operator",
+                "拣选qc": "sorting_qc",
+                "sorting qc": "sorting_qc",
+                "拣选员": "sorting_worker",
+                "sorting worker": "sorting_worker",
+                "二选修正人员": "secondary_sort_rework",
+                "secondary sort rework": "secondary_sort_rework",
+                "采购兼司机": "buyer_driver",
+                "buyer driver": "buyer_driver",
+                "电工": "electrician",
+                "electrician": "electrician",
+                "叉车司机": "forklift_driver",
+                "forklift driver": "forklift_driver",
+                "保安": "security_guard",
+                "security guard": "security_guard",
+                "未设置": "unset_position",
+                "unassigned position": "unset_position",
             },
             "salary_type": {
                 "日薪": "daily",
@@ -228,15 +264,21 @@ def register_auth_admin_routes(app, translate):
                 "piecework": "piecework",
                 "hourly": "hourly",
                 "时薪": "hourly",
+                "小时工": "hourly",
             },
         }
         labels = {
             "team": {
                 "office": {"zh": "办公室", "en": "Office", "my": "ရုံးအဖွဲ့"},
                 "saw_team": {"zh": "锯工组", "en": "Saw Team", "my": "လွှအသင်း"},
+                "dip_kiln_team": {"zh": "药浸&烘干组", "en": "Dip & Kiln Team", "my": "ဆေးစိမ်နှင့် အိုးဖိုအဖွဲ့"},
+                "procurement_team": {"zh": "采购组", "en": "Procurement Team", "my": "ဝယ်ယူရေးအဖွဲ့"},
+                "maintenance_team": {"zh": "设备保障", "en": "Maintenance", "my": "စက်ပစ္စည်းထိန်းသိမ်းရေး"},
+                "security_team": {"zh": "安保组", "en": "Security Team", "my": "လုံခြုံရေးအဖွဲ့"},
                 "kiln_team": {"zh": "窑工组", "en": "Kiln Team", "my": "အိုးဖိုအသင်း"},
                 "sorting_team": {"zh": "拣选组", "en": "Sorting Team", "my": "ရွေးချယ်အသင်း"},
                 "logistics_team": {"zh": "物流组", "en": "Logistics Team", "my": "ပို့ဆောင်ရေးအသင်း"},
+                "unassigned_team": {"zh": "未分组", "en": "Unassigned", "my": "မသတ်မှတ်ထားသောအဖွဲ့"},
             },
             "position": {
                 "finance": {"zh": "财务", "en": "Finance", "my": "ဘဏ္ဍာရေး"},
@@ -247,6 +289,18 @@ def register_auth_admin_routes(app, translate):
                 "sorter": {"zh": "拣选", "en": "Sorter", "my": "ရွေးချယ်လုပ်သား"},
                 "shipper": {"zh": "发货员", "en": "Shipper", "my": "ပို့ဆောင်ရေးဝန်ထမ်း"},
                 "warehouse_keeper": {"zh": "仓管", "en": "Warehouse Keeper", "my": "ဂိုဒေါင်ထိန်း"},
+                "assistant_sawyer": {"zh": "副锯工", "en": "Assistant Sawyer", "my": "လွှအကူလုပ်သား"},
+                "saw_qc": {"zh": "锯工QC", "en": "Saw QC", "my": "လွှ QC"},
+                "dip_kiln_controller": {"zh": "药浸烘干控制(同岗)", "en": "Dip & Kiln Controller", "my": "ဆေးစိမ်နှင့် အိုးဖို ထိန်းချုပ်သူ"},
+                "boiler_operator": {"zh": "锅炉工", "en": "Boiler Operator", "my": "ဘွိုင်လာလုပ်သား"},
+                "sorting_qc": {"zh": "拣选QC", "en": "Sorting QC", "my": "ရွေးချယ် QC"},
+                "sorting_worker": {"zh": "拣选员", "en": "Sorting Worker", "my": "ရွေးချယ်လုပ်သား"},
+                "secondary_sort_rework": {"zh": "二选修正人员", "en": "Secondary Sort Rework", "my": "ဒုတိယရွေး ပြန်ပြင်ဝန်ထမ်း"},
+                "buyer_driver": {"zh": "采购兼司机", "en": "Buyer & Driver", "my": "ဝယ်ယူရေးနှင့် ယာဉ်မောင်း"},
+                "electrician": {"zh": "电工", "en": "Electrician", "my": "လျှပ်စစ်ဝန်ထမ်း"},
+                "forklift_driver": {"zh": "叉车司机", "en": "Forklift Driver", "my": "ဖော့ကလစ်ယာဉ်မောင်း"},
+                "security_guard": {"zh": "保安", "en": "Security Guard", "my": "လုံခြုံရေးဝန်ထမ်း"},
+                "unset_position": {"zh": "未设置", "en": "Unassigned Position", "my": "မသတ်မှတ်ထားသောရာထူး"},
             },
             "salary_type": {
                 "daily": {"zh": "日薪", "en": "Daily Wage", "my": "နေ့စားလစာ"},
@@ -265,16 +319,22 @@ def register_auth_admin_routes(app, translate):
         team_options = payload.get("team_options", []) if isinstance(payload.get("team_options"), list) else []
         position_options = payload.get("position_options", []) if isinstance(payload.get("position_options"), list) else []
         salary_type_options = payload.get("salary_type_options", []) if isinstance(payload.get("salary_type_options"), list) else []
-        payload["team_choices"] = [
-            {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "team", lang)} for v in team_options
-        ]
-        payload["position_choices"] = [
+        team_choices = [{"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "team", lang)} for v in team_options]
+        position_choices = [
             {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "position", lang)} for v in position_options
         ]
-        payload["salary_type_choices"] = [
+        salary_type_choices = [
             {"value": str(v or ""), "label": _localize_hr_option(str(v or ""), "salary_type", lang)}
             for v in salary_type_options
         ]
+        payload["team_choices"] = team_choices
+        payload["position_choices"] = position_choices
+        payload["salary_type_choices"] = salary_type_choices
+        payload["team_label_map"] = {str(x.get("value", "") or ""): str(x.get("label", "") or "") for x in team_choices}
+        payload["position_label_map"] = {str(x.get("value", "") or ""): str(x.get("label", "") or "") for x in position_choices}
+        payload["salary_type_label_map"] = {
+            str(x.get("value", "") or ""): str(x.get("label", "") or "") for x in salary_type_choices
+        }
         return payload
 
     @app.route("/admin/users")
@@ -539,6 +599,8 @@ def register_auth_admin_routes(app, translate):
             salary_types_list = request.form.getlist("salary_type")
             salary_cycles = request.form.getlist("salary_cycle")
             salary_descs = request.form.getlist("salary_desc")
+            overtime_multipliers = request.form.getlist("ot_multiplier_option")
+            default_overtime_multiplier = request.form.get("ot_default_multiplier", "")
             ok, msg, payload = save_hr_admin_settings(
                 teams_json=teams_json,
                 salary_types_json=salary_types_json,
@@ -550,14 +612,22 @@ def register_auth_admin_routes(app, translate):
                 salary_types_list=salary_types_list,
                 salary_cycles=salary_cycles,
                 salary_descs=salary_descs,
+                overtime_multipliers=overtime_multipliers,
+                default_overtime_multiplier=default_overtime_multiplier,
             )
             data = payload
             if ok:
                 result_msg = msg
+                org_data = (data.get("org", {}) or {}) if isinstance(data, dict) else {}
+                attendance_cfg = (org_data.get("attendance", {}) or {}) if isinstance(org_data, dict) else {}
                 _audit(
                     "update_hr_settings",
                     target="hr_org",
-                    detail=f"teams={len((data.get('org', {}) or {}).get('teams', []))},salary_types={len((data.get('org', {}) or {}).get('salary_types', {}))}",
+                    detail=(
+                        f"teams={len(org_data.get('teams', []))},"
+                        f"salary_types={len(org_data.get('salary_types', {}))},"
+                        f"ot_multipliers={len(attendance_cfg.get('overtime_multipliers', []))}"
+                    ),
                 )
             else:
                 error_msg = msg
@@ -602,6 +672,24 @@ def register_auth_admin_routes(app, translate):
                     overtime_multiplier=request.form.get("overtime_multiplier", ""),
                     day=request.form.get("attendance_date", ""),
                 )
+            elif form_action == "attendance_batch":
+                names_json = str(request.form.get("attendance_batch_names_json", "") or "").strip()
+                selected_names = []
+                if names_json:
+                    try:
+                        parsed = json.loads(names_json)
+                        if isinstance(parsed, list):
+                            selected_names = [str(x or "").strip() for x in parsed if str(x or "").strip()]
+                    except Exception:
+                        selected_names = []
+                ok, msg, payload = apply_hr_attendance_batch_from_admin(
+                    names=selected_names,
+                    action=request.form.get("attendance_batch_action", ""),
+                    day=request.form.get("attendance_date", ""),
+                    overtime_hours=request.form.get("attendance_ot_hours", ""),
+                    overtime_multiplier=request.form.get("attendance_ot_multiplier", ""),
+                    special_hours=request.form.get("attendance_special_hours", ""),
+                )
             else:
                 ok, msg, payload = add_hr_employee_from_admin(
                     name=request.form.get("name", ""),
@@ -634,6 +722,18 @@ def register_auth_admin_routes(app, translate):
                             f"regular_hours={request.form.get('regular_hours','')},"
                             f"overtime_hours={request.form.get('overtime_hours','')},"
                             f"overtime_multiplier={request.form.get('overtime_multiplier','')}"
+                        ),
+                    )
+                elif form_action == "attendance_batch":
+                    _audit(
+                        "add_hr_attendance_batch",
+                        target=str(request.form.get("attendance_date", "") or ""),
+                        detail=(
+                            f"action={request.form.get('attendance_batch_action','')},"
+                            f"selected={request.form.get('attendance_batch_names_json','')},"
+                            f"ot_hours={request.form.get('attendance_ot_hours','')},"
+                            f"ot_multiplier={request.form.get('attendance_ot_multiplier','')},"
+                            f"special_hours={request.form.get('attendance_special_hours','')}"
                         ),
                     )
                 else:

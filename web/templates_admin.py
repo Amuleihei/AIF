@@ -717,6 +717,33 @@ ADMIN_HR_SETTINGS_TEMPLATE = """
             </div>
 
             <div class="row">
+                <label>{{ texts.get('hr_overtime_setting_section', '加班倍率设置') }}</label>
+                <table class="tbl" id="ot-table">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.get('hr_overtime_ratio', '加班倍率') }}</th>
+                            <th style="width:84px;">{{ texts.get('actions', '操作') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data.overtime_rows %}
+                        <tr>
+                            <td><input type="number" step="0.1" min="0.1" name="ot_multiplier_option" value="{{ row.multiplier }}"></td>
+                            <td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get('delete', '删除') }}</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="row-actions">
+                    <button type="button" class="btn-mini btn-add" onclick="addOtRow()">+ {{ texts.get('hr_add_ot_ratio', '新增倍率') }}</button>
+                </div>
+                <div class="row-actions">
+                    <label style="margin:0; font-weight:normal;">{{ texts.get('hr_default_ot_ratio', '默认加班倍率') }}</label>
+                    <input type="number" step="0.1" min="0.1" name="ot_default_multiplier" value="{{ data.overtime_default_multiplier }}" style="max-width:180px;">
+                </div>
+            </div>
+
+            <div class="row">
                 <label>{{ texts.get('hr_rule_notes', '规则备注（每行一条）') }}</label>
                 <textarea class="notes" name="notes_text">{{ data.notes_text }}</textarea>
             </div>
@@ -754,6 +781,13 @@ ADMIN_HR_SETTINGS_TEMPLATE = """
             tr.innerHTML = '<td><input type="text" name="salary_type"></td><td><select name="salary_cycle"><option value="weekly" selected>{{ texts.get("hr_cycle_weekly", "weekly（按周）") }}</option><option value="semi_monthly">{{ texts.get("hr_cycle_semi_monthly", "semi_monthly（15天）") }}</option><option value="monthly">{{ texts.get("hr_cycle_monthly", "monthly（按月）") }}</option></select></td><td><input type="text" name="salary_desc"></td><td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get("delete", "删除") }}</button></td>';
             body.appendChild(tr);
         }
+        function addOtRow() {
+            const body = document.querySelector('#ot-table tbody');
+            if (!body) return;
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td><input type="number" step="0.1" min="0.1" name="ot_multiplier_option" value="1.5"></td><td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get("delete", "删除") }}</button></td>';
+            body.appendChild(tr);
+        }
     </script>
 </body>
 </html>
@@ -784,6 +818,13 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
         .btn-edit { background:#0369a1; color:#fff; }
         .form-card { display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin:6px 0 12px; }
         .form-card-static { display:block; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin:6px 0 12px; }
+        .warn-box { background:#fff7ed; border:1px solid #fdba74; color:#9a3412; border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:13px; }
+        .att-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+        .emp-card-grid { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:8px; margin-top:8px; }
+        .emp-card { border:1px solid #cbd5e1; border-radius:8px; background:#fff; padding:10px; cursor:pointer; user-select:none; }
+        .emp-card .n { font-weight:bold; color:#0f172a; }
+        .emp-card .m { font-size:12px; color:#64748b; margin-top:4px; }
+        .emp-card.selected { border-color:#0284c7; box-shadow: 0 0 0 2px rgba(2,132,199,0.15); background:#f0f9ff; }
         .form-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:8px; }
         .form-grid input, .form-grid select { width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:6px; padding:8px; background:#fff; }
         .msg-ok { margin:6px 0; color:#166534; font-size:13px; }
@@ -795,14 +836,15 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
         @media (max-width: 900px) {
             .grid { grid-template-columns: 1fr; }
             .form-grid { grid-template-columns: 1fr; }
+            .emp-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <a href="{{ hr_back_url }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+        <a href="{{ hr_back_url }}?lang={{ lang }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
         {% if can_manage_hr_settings %}
-        <a href="{{ url_for('admin_hr_settings') }}" class="link-inline">{{ texts.get('hr_settings_title', 'HR设置') }}</a>
+        <a href="{{ url_for('admin_hr_settings', lang=lang) }}" class="link-inline">{{ texts.get('hr_settings_title', 'HR设置') }}</a>
         {% endif %}
         <h1>{{ texts.get('hr_employee_mgmt_title', '员工管理') }}</h1>
 
@@ -892,25 +934,58 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
         </div>
         <div class="form-card-static" id="attendance-form">
             <form method="POST" action="{{ url_for('admin_hr_employees') }}">
-                <input type="hidden" name="form_action" value="attendance">
-                <div class="form-grid">
-                    <select name="attendance_name" required>
-                        <option value="">{{ texts.get('hr_select_employee', '请选择员工') }}</option>
-                        {% for n in data.employee_options %}
-                        <option value="{{ n }}">{{ n }}</option>
+                <input type="hidden" name="form_action" value="attendance_batch">
+                <input type="hidden" name="attendance_batch_action" id="attendance-batch-action" value="">
+                <input type="hidden" name="attendance_batch_names_json" id="attendance-batch-names" value="[]">
+
+                {% if data.absent_today_count > 0 %}
+                <div class="warn-box">
+                    {{ texts.get('hr_absent_warning', '今日未出勤提醒') }}:
+                    {{ data.absent_today_count }} 人
+                    （{{ data.absent_today_names|join('、') }}）
+                </div>
+                {% endif %}
+
+                <div class="att-toolbar">
+                    <label class="muted">{{ texts.get('hr_select_mode', '选择模式') }}</label>
+                    <select id="select-mode" style="max-width:140px;">
+                        <option value="multi">{{ texts.get('hr_multi_select', '多选') }}</option>
+                        <option value="single">{{ texts.get('hr_single_select', '单选') }}</option>
+                    </select>
+                    <label class="muted">{{ texts.get('hr_attendance_date', '考勤日期') }}</label>
+                    <input type="date" name="attendance_date" id="attendance-date" value="{{ data.attendance_day }}" style="max-width:170px;">
+                    <span class="muted" id="selected-count">{{ texts.get('selected_label', '已选') }} 0</span>
+                </div>
+
+                <div class="att-toolbar">
+                    <input type="number" step="0.5" min="0" name="attendance_ot_hours" id="attendance-ot-hours" placeholder="{{ texts.get('hr_overtime_hours', '加班工时（h）') }}" value="1" style="max-width:150px;">
+                    <select name="attendance_ot_multiplier" id="attendance-ot-multiplier" style="max-width:170px;">
+                        {% for m in data.overtime_multiplier_options %}
+                        <option value="{{ m }}" {% if m == data.overtime_default_multiplier %}selected{% endif %}>{{ texts.get('hr_overtime_ratio', '加班倍率') }} x{{ '%.2f'|format(m) }}</option>
                         {% endfor %}
                     </select>
-                    <input type="number" step="0.5" min="0" name="regular_hours" placeholder="{{ texts.get('hr_regular_hours', '正常工时（h）') }}" value="8" required>
-                    <input type="number" step="0.5" min="0" name="overtime_hours" placeholder="{{ texts.get('hr_overtime_hours', '加班工时（h）') }}" value="0">
-                    <select name="overtime_multiplier">
-                        <option value="1.5" selected>{{ texts.get('hr_ot_ratio_15', '加班倍率 x1.5') }}</option>
-                        <option value="2.0">{{ texts.get('hr_ot_ratio_20', '加班倍率 x2.0') }}</option>
-                    </select>
-                    <input type="date" name="attendance_date" placeholder="{{ texts.get('hr_attendance_date', '考勤日期') }}">
+                    <input type="number" step="0.5" min="0" name="attendance_special_hours" id="attendance-special-hours" placeholder="{{ texts.get('hr_special_hours', '特殊工时（h）') }}" value="4" style="max-width:150px;">
+                </div>
+
+                <div class="att-toolbar">
+                    <button type="button" class="btn btn-add" onclick="submitAttendanceBatch('present')">{{ texts.get('hr_mark_present', '出勤') }}</button>
+                    <button type="button" class="btn btn-edit" onclick="submitAttendanceBatch('overtime')">{{ texts.get('hr_mark_overtime', '加班 x小时') }}</button>
+                    <button type="button" class="btn" style="background:#d97706;color:#fff;" onclick="submitAttendanceBatch('special_off')">{{ texts.get('hr_mark_special_off', '下班(特殊工时)') }}</button>
+                    <span class="muted">{{ texts.get('hr_special_off_hint', '下班按钮仅用于半天/数小时工时计算，不作为打卡依据') }}</span>
+                </div>
+
+                <div class="emp-card-grid" id="emp-card-grid">
+                    {% for row in data.rows %}
+                    {% if row.status != '离职' %}
+                    <div class="emp-card" data-name="{{ row.name }}" onclick="toggleEmpCard(this, event)">
+                        <div class="n">{{ row.name }}</div>
+                        <div class="m">{{ row.team or '-' }} / {{ row.position or '-' }}</div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
                 </div>
                 <div style="margin-top:8px;">
-                    <button type="submit" class="btn btn-add">{{ texts.get('hr_save_attendance', '保存考勤') }}</button>
-                    <span class="muted" style="margin-left:8px;">{{ texts.get('hr_attendance_hint', '工资试算将自动按小时与加班工时联动') }}</span>
+                    <span class="muted">{{ texts.get('hr_attendance_hint', '工资试算将自动按小时与加班工时联动') }}</span>
                 </div>
             </form>
             <table class="tbl" style="margin-top:10px;">
@@ -984,6 +1059,8 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
     </div>
     <script>
         var teamPositionsMap = {{ data.team_positions_map | tojson }};
+        var positionLabelMap = {{ data.position_label_map | tojson }};
+        var selectedAttendanceNames = [];
 
         function toggleAddForm() {
             var box = document.getElementById('add-form');
@@ -1020,7 +1097,7 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
             positions.forEach(function(p) {
                 var opt = document.createElement('option');
                 opt.value = p;
-                opt.textContent = p;
+                opt.textContent = positionLabelMap[p] || p;
                 if (p === current) opt.selected = true;
                 posEl.appendChild(opt);
             });
@@ -1051,6 +1128,56 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
             box.style.display = 'none';
         }
 
+        function renderSelectedCount() {
+            var el = document.getElementById('selected-count');
+            if (!el) return;
+            el.textContent = '{{ texts.get("selected_label", "已选") }} ' + selectedAttendanceNames.length;
+        }
+
+        function syncAttendanceHiddenFields() {
+            var input = document.getElementById('attendance-batch-names');
+            if (!input) return;
+            input.value = JSON.stringify(selectedAttendanceNames);
+        }
+
+        function toggleEmpCard(card, evt) {
+            if (!card) return;
+            var name = card.getAttribute('data-name') || '';
+            if (!name) return;
+            var modeEl = document.getElementById('select-mode');
+            var mode = modeEl ? modeEl.value : 'multi';
+            if (mode === 'single') {
+                selectedAttendanceNames = [];
+                document.querySelectorAll('.emp-card.selected').forEach(function(x){ x.classList.remove('selected'); });
+            }
+            var idx = selectedAttendanceNames.indexOf(name);
+            if (idx >= 0) {
+                selectedAttendanceNames.splice(idx, 1);
+                card.classList.remove('selected');
+            } else {
+                selectedAttendanceNames.push(name);
+                card.classList.add('selected');
+            }
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        }
+
+        function submitAttendanceBatch(action) {
+            if (!selectedAttendanceNames.length) {
+                alert('{{ texts.get("hr_select_employee", "请选择员工") }}');
+                return;
+            }
+            var actionEl = document.getElementById('attendance-batch-action');
+            if (!actionEl) return;
+            actionEl.value = action || '';
+            syncAttendanceHiddenFields();
+            var formWrap = document.getElementById('attendance-form');
+            if (!formWrap) return;
+            var form = formWrap.querySelector('form');
+            if (!form) return;
+            form.submit();
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             var teamEl = document.getElementById('team-select');
             if (teamEl) {
@@ -1066,6 +1193,8 @@ ADMIN_HR_EMPLOYEES_TEMPLATE = """
                 });
                 refreshPositionOptionsByIds('edit-team-select', 'edit-position-select');
             }
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
         });
     </script>
 </body>

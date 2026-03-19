@@ -32,6 +32,10 @@ def _default_org() -> dict[str, Any]:
             "月薪": {"payout_cycle": "semi_monthly", "desc": "每15天发放"},
             "计件": {"payout_cycle": "weekly", "desc": "按件核算，建议按周结算"},
         },
+        "attendance": {
+            "overtime_multipliers": [1.5, 2.0],
+            "default_overtime_multiplier": 1.5,
+        },
         "notes": [
             "药浸师与烘干房控制为同一人可用岗位: 药浸烘干控制(同岗)",
             "司机与采购同一人可用岗位: 采购兼司机",
@@ -215,6 +219,28 @@ def _ensure_org(d: dict[str, Any]) -> None:
         d["org"]["teams"] = _default_org()["teams"]
     if not isinstance(d["org"].get("salary_types"), dict):
         d["org"]["salary_types"] = _default_org()["salary_types"]
+    if not isinstance(d["org"].get("attendance"), dict):
+        d["org"]["attendance"] = _default_org()["attendance"]
+    attendance_cfg = d["org"].get("attendance", {})
+    if not isinstance(attendance_cfg.get("overtime_multipliers"), list):
+        attendance_cfg["overtime_multipliers"] = list(_default_org()["attendance"]["overtime_multipliers"])
+    cleaned_multipliers: list[float] = []
+    for item in attendance_cfg.get("overtime_multipliers", []):
+        val = round(_to_float(item, 0.0), 2)
+        if val <= 0:
+            continue
+        if val not in cleaned_multipliers:
+            cleaned_multipliers.append(val)
+    if not cleaned_multipliers:
+        cleaned_multipliers = list(_default_org()["attendance"]["overtime_multipliers"])
+    attendance_cfg["overtime_multipliers"] = cleaned_multipliers
+    default_mul = round(_to_float(attendance_cfg.get("default_overtime_multiplier"), 0.0), 2)
+    if default_mul <= 0:
+        default_mul = cleaned_multipliers[0]
+    if default_mul not in cleaned_multipliers:
+        cleaned_multipliers.append(default_mul)
+    attendance_cfg["default_overtime_multiplier"] = default_mul
+    d["org"]["attendance"] = attendance_cfg
     if not isinstance(d["org"].get("notes"), list):
         d["org"]["notes"] = _default_org()["notes"]
 
@@ -533,9 +559,18 @@ def add_hr_attendance_from_admin(
     if not emp_name or emp_name not in emps:
         return False, "❌ 请选择有效员工", get_hr_employees_payload()
 
+    _ensure_org(d)
+    attendance_cfg = d.get("org", {}).get("attendance", {})
+    default_ot_m = _to_float(
+        attendance_cfg.get("default_overtime_multiplier", 1.5) if isinstance(attendance_cfg, dict) else 1.5,
+        1.5,
+    )
+    if default_ot_m <= 0:
+        default_ot_m = 1.5
+
     reg_h = _to_float(str(regular_hours or "").strip() or 0, 0.0)
     ot_h = _to_float(str(overtime_hours or "").strip() or 0, 0.0)
-    ot_m = _to_float(str(overtime_multiplier or "").strip() or 1.5, 1.5)
+    ot_m = _to_float(str(overtime_multiplier or "").strip() or default_ot_m, default_ot_m)
     if reg_h < 0 or ot_h < 0:
         return False, "❌ 工时不能为负数", get_hr_employees_payload()
     if ot_m <= 0:
@@ -556,6 +591,165 @@ def add_hr_attendance_from_admin(
     })
     save(d)
     return True, f"✅ 已记录考勤: {emp_name} 正常{reg_h:.2f}h 加班{ot_h:.2f}h x{ot_m:.2f}", get_hr_employees_payload()
+
+
+def _find_attendance_record(d: dict[str, Any], name: str, day: str) -> dict[str, Any] | None:
+    rows = d.get("attendance_records", [])
+    if not isinstance(rows, list):
+        return None
+    for rec in reversed(rows):
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("name", "")) == name and str(rec.get("date", "")) == day:
+            return rec
+    return None
+
+
+def _upsert_attendance_record(
+    d: dict[str, Any],
+    name: str,
+    day: str,
+    regular_hours: float | None = None,
+    overtime_hours_delta: float | None = None,
+    overtime_multiplier: float | None = None,
+) -> None:
+    rec = _find_attendance_record(d, name, day)
+    now_text = datetime.now().isoformat(timespec="seconds")
+    if rec is None:
+        rec = {
+            "name": name,
+            "days": 0.0,
+            "regular_hours": 0.0,
+            "overtime_hours": 0.0,
+            "overtime_multiplier": 1.5,
+            "date": day,
+            "created_at": now_text,
+            "source": "admin_hr_cards",
+        }
+        rows = d.get("attendance_records", [])
+        if not isinstance(rows, list):
+            rows = []
+            d["attendance_records"] = rows
+        rows.append(rec)
+
+    current_regular = max(0.0, _to_float(rec.get("regular_hours"), 0.0))
+    current_ot = max(0.0, _to_float(rec.get("overtime_hours"), 0.0))
+    current_mul = _to_float(rec.get("overtime_multiplier"), 1.5)
+    if current_mul <= 0:
+        current_mul = 1.5
+
+    if regular_hours is not None:
+        current_regular = max(0.0, float(regular_hours))
+    if overtime_hours_delta is not None:
+        current_ot = max(0.0, current_ot + float(overtime_hours_delta))
+    if overtime_multiplier is not None and float(overtime_multiplier) > 0:
+        current_mul = float(overtime_multiplier)
+
+    rec["regular_hours"] = round(current_regular, 2)
+    rec["overtime_hours"] = round(current_ot, 2)
+    rec["overtime_multiplier"] = round(current_mul, 2)
+    rec["days"] = round(current_regular / 8.0, 4)
+    rec["date"] = day
+    rec["updated_at"] = now_text
+    rec["source"] = "admin_hr_cards"
+
+
+def apply_hr_attendance_batch_from_admin(
+    names: list[str] | None,
+    action: str,
+    day: str,
+    overtime_hours: str = "",
+    overtime_multiplier: str = "",
+    special_hours: str = "",
+) -> tuple[bool, str, dict[str, Any]]:
+    d = _safe_load()
+    _ensure_org(d)
+    emps = d.get("employees", {})
+    if not isinstance(emps, dict):
+        return False, "❌ 员工数据异常", get_hr_employees_payload()
+
+    selected = []
+    for n in (names or []):
+        name = str(n or "").strip()
+        if name and name not in selected:
+            selected.append(name)
+    if not selected:
+        return False, "❌ 请先选择员工", get_hr_employees_payload()
+
+    final_day = _parse_date(str(day or "").strip(), default_today=True)
+    attendance_cfg = d.get("org", {}).get("attendance", {})
+    default_ot_m = _to_float(
+        attendance_cfg.get("default_overtime_multiplier", 1.5) if isinstance(attendance_cfg, dict) else 1.5,
+        1.5,
+    )
+    if default_ot_m <= 0:
+        default_ot_m = 1.5
+
+    act = str(action or "").strip().lower()
+    if act not in ("present", "overtime", "special_off"):
+        return False, "❌ 未知考勤动作", get_hr_employees_payload()
+
+    ot_h = max(0.0, _to_float(str(overtime_hours or "").strip() or 0, 0.0))
+    ot_m = _to_float(str(overtime_multiplier or "").strip() or default_ot_m, default_ot_m)
+    if ot_m <= 0:
+        return False, "❌ 加班倍率必须大于0", get_hr_employees_payload()
+    sp_h = _to_float(str(special_hours or "").strip() or 0, 0.0)
+    if act == "overtime" and ot_h <= 0:
+        return False, "❌ 加班工时必须大于0", get_hr_employees_payload()
+    if act == "special_off" and sp_h <= 0:
+        return False, "❌ 特殊工时必须大于0", get_hr_employees_payload()
+
+    updated = 0
+    skipped = 0
+    for name in selected:
+        e = emps.get(name)
+        if not isinstance(e, dict):
+            skipped += 1
+            continue
+        if str(e.get("status", "在岗")) == "离职":
+            skipped += 1
+            continue
+
+        if act == "present":
+            _upsert_attendance_record(
+                d=d,
+                name=name,
+                day=final_day,
+                regular_hours=8.0,
+            )
+        elif act == "overtime":
+            existing = _find_attendance_record(d, name, final_day)
+            existing_regular = max(0.0, _to_float(existing.get("regular_hours"), 0.0)) if isinstance(existing, dict) else 0.0
+            _upsert_attendance_record(
+                d=d,
+                name=name,
+                day=final_day,
+                regular_hours=max(existing_regular, 8.0),
+                overtime_hours_delta=ot_h,
+                overtime_multiplier=ot_m,
+            )
+        else:
+            _upsert_attendance_record(
+                d=d,
+                name=name,
+                day=final_day,
+                regular_hours=max(0.0, sp_h),
+            )
+        updated += 1
+
+    if updated <= 0:
+        return False, "❌ 没有可更新的员工（可能均为离职）", get_hr_employees_payload()
+
+    save(d)
+    action_text = {
+        "present": "出勤",
+        "overtime": f"加班 {ot_h:.2f}h x{ot_m:.2f}",
+        "special_off": f"下班(特殊工时) {sp_h:.2f}h",
+    }.get(act, act)
+    msg = f"✅ 已更新考勤: {action_text}，人数{updated}，日期{final_day}"
+    if skipped > 0:
+        msg += f"（跳过{skipped}人）"
+    return True, msg, get_hr_employees_payload()
 
 
 def _record_piecework(d: dict[str, Any], name: str, qty: float, unit_price: float | None, day: str) -> str:
@@ -704,6 +898,23 @@ def get_hr_admin_payload() -> dict[str, Any]:
     org = d.get("org", {}) if isinstance(d.get("org"), dict) else _default_org()
     teams = org.get("teams", []) if isinstance(org.get("teams"), list) else []
     salary_types = org.get("salary_types", {}) if isinstance(org.get("salary_types"), dict) else {}
+    attendance_cfg = org.get("attendance", {}) if isinstance(org.get("attendance"), dict) else {}
+    overtime_multipliers_raw = attendance_cfg.get("overtime_multipliers", [])
+    overtime_multipliers: list[float] = []
+    if isinstance(overtime_multipliers_raw, list):
+        for item in overtime_multipliers_raw:
+            mv = round(_to_float(item, 0.0), 2)
+            if mv <= 0:
+                continue
+            if mv not in overtime_multipliers:
+                overtime_multipliers.append(mv)
+    if not overtime_multipliers:
+        overtime_multipliers = [1.5, 2.0]
+    default_ot_multiplier = round(_to_float(attendance_cfg.get("default_overtime_multiplier"), overtime_multipliers[0]), 2)
+    if default_ot_multiplier <= 0:
+        default_ot_multiplier = overtime_multipliers[0]
+    if default_ot_multiplier not in overtime_multipliers:
+        overtime_multipliers.append(default_ot_multiplier)
     team_lines: list[str] = []
     team_rows: list[dict[str, str]] = []
     for item in teams:
@@ -736,6 +947,7 @@ def get_hr_admin_payload() -> dict[str, Any]:
             {"salary_type": "月薪", "payout_cycle": "semi_monthly", "desc": "每15天发放"},
             {"salary_type": "计件", "payout_cycle": "weekly", "desc": "按件核算，建议按周结算"},
         ]
+    overtime_rows = [{"multiplier": f"{m:.2f}".rstrip("0").rstrip(".")} for m in overtime_multipliers]
     return {
         "org": org,
         "teams_json": json.dumps(org.get("teams", []), ensure_ascii=False, indent=2),
@@ -744,6 +956,8 @@ def get_hr_admin_payload() -> dict[str, Any]:
         "salary_types_text": "\n".join(salary_lines),
         "team_rows": team_rows,
         "salary_rows": salary_rows,
+        "overtime_rows": overtime_rows,
+        "overtime_default_multiplier": default_ot_multiplier,
         "notes_text": "\n".join(org.get("notes", []) if isinstance(org.get("notes"), list) else []),
         "employee_total": len(emps) if isinstance(emps, dict) else 0,
         "employee_active": active,
@@ -756,6 +970,7 @@ def get_hr_employees_payload() -> dict[str, Any]:
     org = d.get("org", {}) if isinstance(d.get("org"), dict) else _default_org()
     teams = org.get("teams", []) if isinstance(org.get("teams"), list) else []
     salary_types = org.get("salary_types", {}) if isinstance(org.get("salary_types"), dict) else {}
+    attendance_cfg = org.get("attendance", {}) if isinstance(org.get("attendance"), dict) else {}
     team_options: list[str] = []
     team_positions_map: dict[str, list[str]] = {}
     position_set: set[str] = set()
@@ -779,6 +994,22 @@ def get_hr_employees_payload() -> dict[str, Any]:
     salary_type_options = [str(k or "").strip() for k in salary_types.keys() if str(k or "").strip()]
     if not salary_type_options:
         salary_type_options = ["日薪", "月薪", "计件"]
+    overtime_multiplier_options: list[float] = []
+    raw_ot_options = attendance_cfg.get("overtime_multipliers", [])
+    if isinstance(raw_ot_options, list):
+        for item in raw_ot_options:
+            mv = round(_to_float(item, 0.0), 2)
+            if mv <= 0:
+                continue
+            if mv not in overtime_multiplier_options:
+                overtime_multiplier_options.append(mv)
+    if not overtime_multiplier_options:
+        overtime_multiplier_options = [1.5, 2.0]
+    overtime_default_multiplier = round(_to_float(attendance_cfg.get("default_overtime_multiplier"), overtime_multiplier_options[0]), 2)
+    if overtime_default_multiplier <= 0:
+        overtime_default_multiplier = overtime_multiplier_options[0]
+    if overtime_default_multiplier not in overtime_multiplier_options:
+        overtime_multiplier_options.append(overtime_default_multiplier)
     position_options = sorted(position_set)
     emps = d.get("employees", {})
     rows: list[dict[str, Any]] = []
@@ -807,6 +1038,8 @@ def get_hr_employees_payload() -> dict[str, Any]:
             )
     attendance_rows: list[dict[str, Any]] = []
     raw_attendance = d.get("attendance_records", [])
+    today = _today()
+    attended_today: set[str] = set()
     if isinstance(raw_attendance, list):
         for rec in raw_attendance[-30:]:
             if not isinstance(rec, dict):
@@ -815,16 +1048,21 @@ def get_hr_employees_payload() -> dict[str, Any]:
             if rh < 0:
                 rh = max(0.0, _to_float(rec.get("days"), 0.0) * 8.0)
             oh = max(0.0, _to_float(rec.get("overtime_hours"), 0.0))
+            rec_day = str(rec.get("date", "") or "")
+            rec_name = str(rec.get("name", "") or "")
+            if rec_day == today and rec_name and (rh > 0 or oh > 0):
+                attended_today.add(rec_name)
             attendance_rows.append(
                 {
-                    "name": str(rec.get("name", "") or ""),
-                    "date": str(rec.get("date", "") or ""),
+                    "name": rec_name,
+                    "date": rec_day,
                     "regular_hours": round(max(0.0, rh), 2),
                     "overtime_hours": round(oh, 2),
                     "overtime_multiplier": round(_to_float(rec.get("overtime_multiplier"), 1.5), 2),
                 }
             )
     attendance_rows.sort(key=lambda x: (str(x.get("date", "")), str(x.get("name", ""))), reverse=True)
+    absent_today_names = [name for name in sorted(set(employee_options)) if name not in attended_today]
     rows.sort(key=lambda r: (0 if r.get("status") != "离职" else 1, str(r.get("name", ""))))
     return {
         "employee_total": len(rows),
@@ -835,8 +1073,13 @@ def get_hr_employees_payload() -> dict[str, Any]:
         "team_options": team_options,
         "position_options": position_options,
         "salary_type_options": salary_type_options,
+        "overtime_multiplier_options": overtime_multiplier_options,
+        "overtime_default_multiplier": overtime_default_multiplier,
         "team_positions_map": team_positions_map,
         "attendance_rows": attendance_rows[:20],
+        "attendance_day": today,
+        "absent_today_names": absent_today_names,
+        "absent_today_count": len(absent_today_names),
     }
 
 
@@ -1002,6 +1245,8 @@ def save_hr_admin_settings(
     salary_types_list: list[str] | None = None,
     salary_cycles: list[str] | None = None,
     salary_descs: list[str] | None = None,
+    overtime_multipliers: list[str] | None = None,
+    default_overtime_multiplier: str = "",
 ) -> tuple[bool, str, dict[str, Any]]:
     d = _safe_load()
     _ensure_org(d)
@@ -1048,8 +1293,30 @@ def save_hr_admin_settings(
         return False, f"❌ HR设置格式错误: {e}", get_hr_admin_payload()
 
     notes = [x.strip() for x in str(notes_text or "").splitlines() if x.strip()]
+    ot_values: list[float] = []
+    for raw in (overtime_multipliers or []):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        mv = round(_to_float(text, 0.0), 2)
+        if mv <= 0:
+            continue
+        if mv not in ot_values:
+            ot_values.append(mv)
+    if not ot_values:
+        ot_values = list(_default_org()["attendance"]["overtime_multipliers"])
+    default_ot = round(_to_float(str(default_overtime_multiplier or "").strip() or ot_values[0], ot_values[0]), 2)
+    if default_ot <= 0:
+        default_ot = ot_values[0]
+    if default_ot not in ot_values:
+        ot_values.append(default_ot)
+
     d["org"]["teams"] = teams
     d["org"]["salary_types"] = salary_types
+    d["org"]["attendance"] = {
+        "overtime_multipliers": ot_values,
+        "default_overtime_multiplier": default_ot,
+    }
     d["org"]["notes"] = notes
     save(d)
     return True, "✅ HR组织与薪资规则已保存", get_hr_admin_payload()

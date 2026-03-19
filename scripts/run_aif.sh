@@ -88,12 +88,24 @@ else
   "$PYTHON_BIN" -u "$WEB_ENTRY" &
 fi
 web_pid=$!
-"$PYTHON_BIN" -u "$TG_ENTRY" &
-tg_pid=$!
+bot_token_present="0"
+if [[ -n "${BOT_TOKEN:-}" ]]; then
+  bot_token_present="1"
+fi
 
-# 任一子进程退出都触发整体退出，让 systemd 按策略重启。
-wait -n "$web_pid" "$tg_pid"
-exit_code=$?
+if [[ "${bot_token_present}" == "1" ]]; then
+  "$PYTHON_BIN" -u "$TG_ENTRY" &
+  tg_pid=$!
+  # Web + TG 同时运行时，任一退出触发整体退出（交给 systemd 拉起）。
+  wait -n "$web_pid" "$tg_pid"
+  exit_code=$?
+else
+  echo "[run_aif] BOT_TOKEN is missing, starting WEB only (TG skipped)."
+  # BOT_TOKEN 缺失时保持 Web 持续可用，避免 TG 失败导致整站不可访问。
+  wait "$web_pid"
+  exit_code=$?
+fi
+
 stop_all
 wait || true
 if [[ "${stopping}" == "1" ]]; then
