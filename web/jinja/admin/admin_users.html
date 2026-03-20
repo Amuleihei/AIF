@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="{{ lang or 'zh' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.get('user_management', '用户管理') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/admin_users.css') }}">
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('admin_root') }}" class="back-link">← 管理总览</a>
+        <a href="{{ url_for('admin_audit_logs') }}" class="link-inline">{{ texts.get('audit_logs', '审计日志') }}</a>
+        <a href="{{ url_for('admin_alert_settings') }}" class="link-inline">预警值设置</a>
+        <h1>{{ texts.get('user_management', '用户管理') }}</h1>
+        
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3>{{ texts.get('add_user', '添加用户') }}</h3>
+            <form id="addUserForm">
+                <div class="form-group">
+                    <label>{{ texts.get('username', '用户名') }}:</label>
+                    <input type="text" id="newUsername" required>
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.get('password', '密码') }}:</label>
+                    <input type="password" id="newPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.get('role', '角色') }}:</label>
+                    <select id="newRole" required>
+                        <option value="boss">{{ texts.get('boss', '老板') }}</option>
+                        <option value="finance">{{ texts.get('finance', '统计财务') }}</option>
+                        <option value="admin">{{ texts.get('admin', '管理员') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-success">{{ texts.get('add', '添加') }}</button>
+            </form>
+        </div>
+        
+        <table class="user-table">
+            <thead>
+                <tr>
+                    <th>{{ texts.get('username', '用户名') }}</th>
+                    <th>{{ texts.get('role', '角色') }}</th>
+                    <th>{{ texts.get('created_at', '创建时间') }}</th>
+                    <th>账号安全状态</th>
+                    <th>{{ texts.get('actions', '操作') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                {% set sec = sec_map.get(user.username) %}
+                <tr>
+                    <td>{{ user.username }}</td>
+                    <td>
+                        {% if user.role == 'admin' %}
+                            <span class="role-admin">{{ texts.get('admin', '管理员') }}</span>
+                        {% elif user.role == 'boss' %}
+                            <span class="role-boss">{{ texts.get('boss', '老板') }}</span>
+                        {% elif user.role == 'finance' %}
+                            <span class="role-finance">{{ texts.get('finance', '统计财务') }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.created_at[:10] if user.created_at else '' }}</td>
+                    <td>
+                        {% if sec and sec.locked_until_ts and sec.locked_until_ts > now_ts %}
+                            <span style="color:#dc3545;font-weight:bold;">锁定中（约 {{ ((sec.locked_until_ts - now_ts + 59) // 60) }} 分钟）</span><br>
+                            <span style="color:#6c757d;">失败次数计数：{{ sec.failed_count or 0 }}</span>
+                        {% elif sec and (sec.failed_count or 0) > 0 %}
+                            <span style="color:#fd7e14;font-weight:bold;">警告：失败 {{ sec.failed_count }} 次</span>
+                        {% else %}
+                            <span style="color:#28a745;font-weight:bold;">正常</span>
+                        {% endif %}
+                        <br>
+                        <span style="color:#6c757d;">外网可信IP：{{ trusted_ip_count_map.get(user.username, 0) }}</span>
+                    </td>
+                    <td>
+                        <button class="btn btn-primary" onclick="changePassword({{ user.id }}, '{{ user.username }}')">{{ texts.get('change_password', '修改密码') }}</button>
+                        <button class="btn btn-success" onclick="unlockUser({{ user.id }}, '{{ user.username }}')">解锁账号</button>
+                        <button class="btn btn-danger" onclick="clearTrustedIps({{ user.id }}, '{{ user.username }}')">清除外网IP信任</button>
+                        {% if user.id != current_user.id %}
+                            <button class="btn btn-danger" onclick="deleteUser({{ user.id }})">{{ texts.get('delete', '删除') }}</button>
+                        {% else %}
+                            <span style="color: #6c757d;">{{ texts.get('current_user', '当前用户') }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% include 'partials/admin_users_script.html' %}
+</body>
+</html>

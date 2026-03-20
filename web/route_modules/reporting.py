@@ -15,7 +15,7 @@ from web.route_support import (
 from web.templates_report import DAILY_REPORT_TEMPLATE, BOSS_DAILY_REPORT_TEMPLATE
 from web.utils import get_lang
 from web.services.daily_report_service import build_daily_report
-from web.services.period_report_service import get_report
+from web.services.period_report_service import get_report, rebuild_period_report
 from web.i18n import LANGUAGES
 
 
@@ -297,6 +297,11 @@ def register_reporting_routes(app):
             return redirect(url_for("index", lang=get_lang()))
         lang = get_lang()
         key = (request.args.get("key") or "").strip()
+        if key:
+            try:
+                rebuild_period_report("weekly", key)
+            except Exception:
+                pass
         report = get_report("weekly", key=key or None)
         if not report:
             flash("暂无周报数据", "error")
@@ -321,6 +326,11 @@ def register_reporting_routes(app):
             return redirect(url_for("index", lang=get_lang()))
         lang = get_lang()
         key = (request.args.get("key") or "").strip()
+        if key:
+            try:
+                rebuild_period_report("monthly", key)
+            except Exception:
+                pass
         report = get_report("monthly", key=key or None)
         if not report:
             flash("暂无月报数据", "error")

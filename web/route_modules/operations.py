@@ -181,6 +181,10 @@ def register_operations_routes(app, logger):
         kiln = kilns.get(kiln_id, {})
         old_status = str(kiln.get("status", "empty") or "empty")
         kiln["status"] = status
+        if old_status != status:
+            kiln["status_changed_at"] = int(time.time())
+        elif not kiln.get("status_changed_at"):
+            kiln["status_changed_at"] = int(time.time())
         kiln.pop("manual_elapsed_hours", None)
         kiln.pop("manual_remaining_hours", None)
 

@@ -62,6 +62,7 @@ from web.route_support import (
     sync_raw_inventory,
 )
 from io import BytesIO
+from web.services.alert_settings_service import get_alert_settings
 
 LOG_PRICE_RULE_DEFS = [
     {"key": "15_17", "label": "15-17", "min": 15.0, "max": 17.0, "is_max_open": 0, "default_price": 90000.0},
@@ -72,6 +73,16 @@ LOG_PRICE_RULE_DEFS = [
     {"key": "25_plus_450", "label": "25+", "min": 25.0, "max": 0.0, "is_max_open": 1, "default_price": 450000.0},
 ]
 LOG_PRICE_RULE_DEF_MAP = {item["key"]: item for item in LOG_PRICE_RULE_DEFS}
+KILN_MAX_TRAYS_DEFAULT = 70
+
+
+def _get_kiln_max_trays() -> int:
+    try:
+        cfg = get_alert_settings()
+        val = _to_int((cfg or {}).get("kiln_max_trays"), KILN_MAX_TRAYS_DEFAULT)
+        return max(1, val)
+    except Exception:
+        return KILN_MAX_TRAYS_DEFAULT
 
 
 def _parse_secondary_sort_input(raw: str):
@@ -1163,14 +1174,15 @@ def register_production_kiln_routes(app, logger=None):
             audit_detail = ""
 
             if action == "start_dry":
+                kiln_max_trays = _get_kiln_max_trays()
                 confirm_dry = request.form.get("confirm_dry", "0")
                 kilns = _load_kilns_data()
                 kiln_data = kilns.get(kiln_id, {})
                 trays_in_kiln = kiln_data.get("trays", [])
                 current_trays = sum(_to_int(t.get("count"), 0) for t in trays_in_kiln) if isinstance(trays_in_kiln, list) else 0
-                if current_trays < 60 and confirm_dry != "1":
+                if current_trays < kiln_max_trays and confirm_dry != "1":
                     return _redirect_index_result(
-                        f"❌ {_t('kiln_dry_not_full_confirm_needed').format(current=current_trays, max_trays=60)}",
+                        f"❌ {_t('kiln_dry_not_full_confirm_needed').format(current=current_trays, max_trays=kiln_max_trays)}",
                         error=True,
                     )
                 update_kiln_status(kiln_id, "drying")
@@ -1228,6 +1240,7 @@ def register_production_kiln_routes(app, logger=None):
                           f"မီးဖို {kiln_id} ထုတ်ရန် အသင့်" if lc == "my" else
                           f"窑{kiln_id} 已完成待出")
             elif action == "load":
+                kiln_max_trays = _get_kiln_max_trays()
                 confirm_missing_sort = request.form.get("confirm_missing_sort", "0")
                 flow_data = _read_flow_data()
                 selected_tray_details = flow_data.get("selected_tray_details", [])
@@ -1247,8 +1260,11 @@ def register_production_kiln_routes(app, logger=None):
                 ]
                 merged_trays = kept_existing + tray_list
                 total_tray_count = sum(_to_int(item.get("count"), 0) for item in merged_trays if isinstance(item, dict))
-                if total_tray_count > 60:
-                    return _redirect_index_result(f"❌ {_t('kiln_capacity_exceeded')}", error=True)
+                if total_tray_count > kiln_max_trays:
+                    return _redirect_index_result(
+                        f"❌ {_t('kiln_capacity_exceeded').format(max_trays=kiln_max_trays)}",
+                        error=True,
+                    )
 
                 today_sorted = _today_sorted_trays()
                 if loaded_tray_count > 0 and today_sorted <= 0 and confirm_missing_sort != "1":
@@ -1304,6 +1320,12 @@ def register_production_kiln_routes(app, logger=None):
                 tray_list, unload_count = _parse_kiln_trays_input(trays, {}, allow_plain_count=True)
                 kilns = _load_kilns_data()
                 if kiln_id in kilns:
+                    # 中文注释：若当前为完成待出(ready)，发生出窑动作后自动进入出窑中(unloading)。
+                    current_status = str(kilns[kiln_id].get("status", "") or "")
+                    if unload_count > 0 and current_status == "ready":
+                        kilns[kiln_id]["status"] = "unloading"
+                        kilns[kiln_id]["status_changed_at"] = int(time.time())
+
                     kilns[kiln_id]["unloaded_count"] = kilns[kiln_id].get("unloaded_count", 0) + unload_count
                     trays_total = sum(tray.get("count", 0) for tray in kilns[kiln_id].get("trays", []))
                     stored_total = int(kilns[kiln_id].get("unloading_total_trays", 0) or 0)
@@ -1313,7 +1335,12 @@ def register_production_kiln_routes(app, logger=None):
                         total_trays = kilns[kiln_id]["unloaded_count"]
                     kilns[kiln_id]["unloading_total_trays"] = total_trays
                     if kilns[kiln_id]["unloaded_count"] >= total_trays:
+                        prev_status = str(kilns[kiln_id].get("status", "") or "")
                         kilns[kiln_id]["status"] = "completed"
+                        if prev_status != "completed":
+                            kilns[kiln_id]["status_changed_at"] = int(time.time())
+                        elif not kilns[kiln_id].get("status_changed_at"):
+                            kilns[kiln_id]["status_changed_at"] = int(time.time())
                     _save_kilns_data(kilns)
 
                 flow_data = _read_flow_data()
@@ -1472,20 +1499,19 @@ def register_production_kiln_routes(app, logger=None):
                 parts = product.strip().split("#")
                 if len(parts) == 3:
                     product_id = parts[0].strip()
-                    # 业务规则：一个编号就是一件，忽略前端传入数量，避免按编号/规则误算大件数。
-                    count = 1
+                    count = _to_int(parts[1].strip(), 0)
                     grade = parts[2].strip().upper()
                     if not product_id or count <= 0:
                         raise ValueError("invalid product entry")
                     spec, volume = _infer_spec_and_volume(product_id, count, None)
                     upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存")
-                    total_product_count += count
+                    # 业务口径：一个编号=一件；count 为每件内根数（pcs）。
+                    total_product_count += 1
                     total_volume += volume
                 elif len(parts) >= 4:
                     product_id = parts[0].strip()
                     spec = parts[1].strip()
-                    # 业务规则：一个编号就是一件，忽略前端传入数量，避免按编号/规则误算大件数。
-                    count = 1
+                    count = _to_int(parts[2].strip(), 0)
                     grade = parts[3].strip().upper()
                     if not product_id or count <= 0:
                         raise ValueError("invalid product entry")
@@ -1493,7 +1519,8 @@ def register_production_kiln_routes(app, logger=None):
                     _register_secondary_rule(spec, count)
                     spec, volume = _infer_spec_and_volume(product_id, count, spec)
                     upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存")
-                    total_product_count += count
+                    # 业务口径：一个编号=一件；count 为每件内根数（pcs）。
+                    total_product_count += 1
                     total_volume += volume
 
             batch_number = generate_product_batch_number()
@@ -1635,8 +1662,9 @@ def register_production_kiln_routes(app, logger=None):
                 }
             )
 
-        if total > 60:
-            return jsonify({"error": _t("kiln_capacity_exceeded")}), 400
+        kiln_max_trays = _get_kiln_max_trays()
+        if total > kiln_max_trays:
+            return jsonify({"error": _t("kiln_capacity_exceeded").format(max_trays=kiln_max_trays)}), 400
 
         kilns = _load_kilns_data()
         kiln = kilns.get(kiln_id, {})

@@ -267,52 +267,58 @@ def register_auth_admin_routes(app, translate):
                 "小时工": "hourly",
             },
         }
-        labels = {
+        label_key_map = {
             "team": {
-                "office": {"zh": "办公室", "en": "Office", "my": "ရုံးအဖွဲ့"},
-                "saw_team": {"zh": "锯工组", "en": "Saw Team", "my": "လွှအသင်း"},
-                "dip_kiln_team": {"zh": "药浸&烘干组", "en": "Dip & Kiln Team", "my": "ဆေးစိမ်နှင့် အိုးဖိုအဖွဲ့"},
-                "procurement_team": {"zh": "采购组", "en": "Procurement Team", "my": "ဝယ်ယူရေးအဖွဲ့"},
-                "maintenance_team": {"zh": "设备保障", "en": "Maintenance", "my": "စက်ပစ္စည်းထိန်းသိမ်းရေး"},
-                "security_team": {"zh": "安保组", "en": "Security Team", "my": "လုံခြုံရေးအဖွဲ့"},
-                "kiln_team": {"zh": "窑工组", "en": "Kiln Team", "my": "အိုးဖိုအသင်း"},
-                "sorting_team": {"zh": "拣选组", "en": "Sorting Team", "my": "ရွေးချယ်အသင်း"},
-                "logistics_team": {"zh": "物流组", "en": "Logistics Team", "my": "ပို့ဆောင်ရေးအသင်း"},
-                "unassigned_team": {"zh": "未分组", "en": "Unassigned", "my": "မသတ်မှတ်ထားသောအဖွဲ့"},
+                "office": "hr_team_office",
+                "saw_team": "hr_team_saw_team",
+                "dip_kiln_team": "hr_team_dip_kiln_team",
+                "procurement_team": "hr_team_procurement_team",
+                "maintenance_team": "hr_team_maintenance_team",
+                "security_team": "hr_team_security_team",
+                "kiln_team": "hr_team_kiln_team",
+                "sorting_team": "hr_team_sorting_team",
+                "logistics_team": "hr_team_logistics_team",
+                "unassigned_team": "hr_team_unassigned_team",
             },
             "position": {
-                "finance": {"zh": "财务", "en": "Finance", "my": "ဘဏ္ဍာရေး"},
-                "statistics": {"zh": "统计", "en": "Statistics", "my": "စာရင်းအင်း"},
-                "manager": {"zh": "经理", "en": "Manager", "my": "မန်နေဂျာ"},
-                "sawyer": {"zh": "锯工", "en": "Sawyer", "my": "လွှလုပ်သား"},
-                "kiln_operator": {"zh": "窑工", "en": "Kiln Operator", "my": "အိုးဖိုလုပ်သား"},
-                "sorter": {"zh": "拣选", "en": "Sorter", "my": "ရွေးချယ်လုပ်သား"},
-                "shipper": {"zh": "发货员", "en": "Shipper", "my": "ပို့ဆောင်ရေးဝန်ထမ်း"},
-                "warehouse_keeper": {"zh": "仓管", "en": "Warehouse Keeper", "my": "ဂိုဒေါင်ထိန်း"},
-                "assistant_sawyer": {"zh": "副锯工", "en": "Assistant Sawyer", "my": "လွှအကူလုပ်သား"},
-                "saw_qc": {"zh": "锯工QC", "en": "Saw QC", "my": "လွှ QC"},
-                "dip_kiln_controller": {"zh": "药浸烘干控制(同岗)", "en": "Dip & Kiln Controller", "my": "ဆေးစိမ်နှင့် အိုးဖို ထိန်းချုပ်သူ"},
-                "boiler_operator": {"zh": "锅炉工", "en": "Boiler Operator", "my": "ဘွိုင်လာလုပ်သား"},
-                "sorting_qc": {"zh": "拣选QC", "en": "Sorting QC", "my": "ရွေးချယ် QC"},
-                "sorting_worker": {"zh": "拣选员", "en": "Sorting Worker", "my": "ရွေးချယ်လုပ်သား"},
-                "secondary_sort_rework": {"zh": "二选修正人员", "en": "Secondary Sort Rework", "my": "ဒုတိယရွေး ပြန်ပြင်ဝန်ထမ်း"},
-                "buyer_driver": {"zh": "采购兼司机", "en": "Buyer & Driver", "my": "ဝယ်ယူရေးနှင့် ယာဉ်မောင်း"},
-                "electrician": {"zh": "电工", "en": "Electrician", "my": "လျှပ်စစ်ဝန်ထမ်း"},
-                "forklift_driver": {"zh": "叉车司机", "en": "Forklift Driver", "my": "ဖော့ကလစ်ယာဉ်မောင်း"},
-                "security_guard": {"zh": "保安", "en": "Security Guard", "my": "လုံခြုံရေးဝန်ထမ်း"},
-                "unset_position": {"zh": "未设置", "en": "Unassigned Position", "my": "မသတ်မှတ်ထားသောရာထူး"},
+                "finance": "hr_position_finance",
+                "statistics": "hr_position_statistics",
+                "manager": "hr_position_manager",
+                "sawyer": "hr_position_sawyer",
+                "kiln_operator": "hr_position_kiln_operator",
+                "sorter": "hr_position_sorter",
+                "shipper": "hr_position_shipper",
+                "warehouse_keeper": "hr_position_warehouse_keeper",
+                "assistant_sawyer": "hr_position_assistant_sawyer",
+                "saw_qc": "hr_position_saw_qc",
+                "dip_kiln_controller": "hr_position_dip_kiln_controller",
+                "boiler_operator": "hr_position_boiler_operator",
+                "sorting_qc": "hr_position_sorting_qc",
+                "sorting_worker": "hr_position_sorting_worker",
+                "secondary_sort_rework": "hr_position_secondary_sort_rework",
+                "buyer_driver": "hr_position_buyer_driver",
+                "electrician": "hr_position_electrician",
+                "forklift_driver": "hr_position_forklift_driver",
+                "security_guard": "hr_position_security_guard",
+                "unset_position": "hr_position_unset_position",
             },
             "salary_type": {
-                "daily": {"zh": "日薪", "en": "Daily Wage", "my": "နေ့စားလစာ"},
-                "monthly": {"zh": "月薪", "en": "Monthly Salary", "my": "လစာ (လစဉ်)"},
-                "piecework": {"zh": "计件", "en": "Piece Rate", "my": "အပိုင်းလိုက်လစာ"},
-                "hourly": {"zh": "时薪", "en": "Hourly Wage", "my": "နာရီလိုက်လစာ"},
+                "daily": "hr_salary_type_daily",
+                "monthly": "hr_salary_type_monthly",
+                "piecework": "hr_salary_type_piecework",
+                "hourly": "hr_salary_type_hourly",
             },
         }
         canonical = alias_map.get(kind, {}).get(key) or alias_map.get(kind, {}).get(raw)
         if not canonical:
             return raw
-        return labels.get(kind, {}).get(canonical, {}).get(lang, raw)
+        lang_code = str(lang or "zh")
+        lang_pack = LANGUAGES.get(lang_code, LANGUAGES.get("zh", {}))
+        zh_pack = LANGUAGES.get("zh", {})
+        i18n_key = label_key_map.get(kind, {}).get(canonical)
+        if not i18n_key:
+            return raw
+        return str(lang_pack.get(i18n_key, zh_pack.get(i18n_key, raw)) or raw)
 
     def _attach_hr_choice_labels(data: dict, lang: str) -> dict:
         payload = dict(data or {})
@@ -444,7 +450,7 @@ def register_auth_admin_routes(app, translate):
             user_total = int(session.query(User).count() or 0)
         finally:
             session.close()
-        center = get_alert_center_payload()
+        center = get_alert_center_payload(lang=lang)
         links = get_period_report_links()
         stats = {
             "user_total": user_total,
@@ -472,6 +478,7 @@ def register_auth_admin_routes(app, translate):
                 "sorting_stock_tray_min": request.form.get("sorting_stock_tray_min"),
                 "kiln_done_stock_tray_max": request.form.get("kiln_done_stock_tray_max"),
                 "product_shippable_tray_min": request.form.get("product_shippable_tray_min"),
+                "kiln_max_trays": request.form.get("kiln_max_trays"),
             }
             saved = save_alert_settings(payload)
             append_threshold_version(saved, operator=str(getattr(current_user, "username", "") or ""))
@@ -482,7 +489,8 @@ def register_auth_admin_routes(app, translate):
                     f"log_min={saved.get('log_stock_mt_min')},"
                     f"sorting_min={saved.get('sorting_stock_tray_min')},"
                     f"kiln_done_max={saved.get('kiln_done_stock_tray_max')},"
-                    f"product_shippable_tray_min={saved.get('product_shippable_tray_min')}"
+                    f"product_shippable_tray_min={saved.get('product_shippable_tray_min')},"
+                    f"kiln_max_trays={saved.get('kiln_max_trays')}"
                 ),
             )
             result_msg = "✅ 预警值已保存并生效"
@@ -549,7 +557,7 @@ def register_auth_admin_routes(app, translate):
                 _audit("set_alert_silence", target="alert_engine", detail=f"minutes={minutes},until={until_ts}")
                 result_msg = "✅ 通知静默已更新"
 
-        data = get_alert_center_payload()
+        data = get_alert_center_payload(lang=get_lang())
         return render_template_string(ADMIN_ALERT_CENTER_TEMPLATE, data=data, result_msg=result_msg)
 
     @app.route("/admin/alert-center/action", methods=["POST"])

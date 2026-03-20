@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="{{ lang or 'zh' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理总览</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .nav a { display:inline-block; margin:0 8px 8px 0; color:#0d6efd; text-decoration:none; border:1px solid #dbeafe; border-radius:999px; padding:4px 10px; font-size:13px; }
+        .grid { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; margin: 12px 0 16px; }
+        .card { border:1px solid #e5e7eb; border-radius:10px; padding:12px; background:#f8fafc; }
+        .card .k { color:#64748b; font-size:12px; }
+        .card .v { margin-top:4px; font-size:22px; font-weight:bold; color:#0f172a; }
+        .panel { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin-top:12px; background:#fff; }
+        .btn { display:inline-block; margin: 6px 8px 0 0; text-decoration:none; border-radius:8px; padding:8px 12px; border:1px solid #dbeafe; color:#0f172a; background:#eff6ff; }
+        @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('index', lang=lang) }}" style="color:#0d6efd; text-decoration:none;">← {{ texts.get('back_home', '返回首页') }}</a>
+        <h1 style="margin:10px 0;">{{ texts.get('admin_overview_title', '管理总览') }}</h1>
+        <div class="nav">
+            <a href="{{ url_for('admin_root') }}">{{ texts.get('admin_overview_title', '管理总览') }}</a>
+            <a href="{{ url_for('admin_hr_employees') }}">{{ texts.get('employee_mgmt_link', '员工管理') }}</a>
+            <a href="{{ url_for('admin_users') }}">{{ texts.get('user_management', '用户管理') }}</a>
+            <a href="{{ url_for('admin_audit_logs') }}">{{ texts.get('audit_logs', '审计日志') }}</a>
+            <a href="{{ url_for('admin_alert_settings') }}">{{ texts.get('alert_threshold', '预警阈值') }}</a>
+            <a href="{{ url_for('admin_hr_settings') }}">{{ texts.get('hr_settings_title', 'HR设置') }}</a>
+        </div>
+
+        <div class="grid">
+            <div class="card"><div class="k">{{ texts.get('admin_stat_user_total', '用户数') }}</div><div class="v">{{ stats.user_total }}</div></div>
+            <div class="card"><div class="k">{{ texts.get('admin_stat_active_alerts', '活动预警') }}</div><div class="v">{{ stats.active_alerts }}</div></div>
+            <div class="card"><div class="k">{{ texts.get('admin_stat_weekly_status', '周报状态') }}</div><div class="v" style="font-size:16px;">{{ texts.get('admin_status_generated', '已生成') if stats.weekly_generated else texts.get('admin_status_not_generated', '未生成') }}</div></div>
+            <div class="card"><div class="k">{{ texts.get('admin_stat_monthly_status', '月报状态') }}</div><div class="v" style="font-size:16px;">{{ texts.get('admin_status_generated', '已生成') if stats.monthly_generated else texts.get('admin_status_not_generated', '未生成') }}</div></div>
+        </div>
+
+        <div class="panel">
+            <strong>{{ texts.get('admin_quick_links', '快捷入口') }}</strong><br>
+            <a class="btn" href="{{ url_for('admin_hr_employees') }}">{{ texts.get('admin_quick_hr_employees', '员工档案管理') }}</a>
+            <a class="btn" href="{{ url_for('admin_users') }}">{{ texts.get('admin_quick_users_security', '用户与账号安全') }}</a>
+            <a class="btn" href="{{ url_for('admin_audit_logs') }}">{{ texts.get('admin_quick_audit', '审计日志查询') }}</a>
+            <a class="btn" href="{{ url_for('admin_alert_settings') }}">{{ texts.get('admin_quick_alert_threshold', '库存预警阈值设置') }}</a>
+            <a class="btn" href="{{ url_for('admin_hr_settings') }}">{{ texts.get('admin_quick_hr_settings', 'HR组织与薪资设置') }}</a>
+            {% if stats.weekly_url %}
+            <a class="btn" href="{{ stats.weekly_url }}&lang={{ lang }}">{{ texts.get('admin_quick_view_weekly', '查看周报') }} {{ stats.weekly_key }}</a>
+            {% endif %}
+            {% if stats.monthly_url %}
+            <a class="btn" href="{{ stats.monthly_url }}&lang={{ lang }}">{{ texts.get('admin_quick_view_monthly', '查看月报') }} {{ stats.monthly_key }}</a>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

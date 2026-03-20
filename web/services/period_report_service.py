@@ -14,6 +14,7 @@ from web.models import (
     ProductBatch,
     ByproductRecord,
     FlowSecondSortRecord,
+    InventoryProduct,
 )
 from web.data_store import get_log_stock_total, get_product_stats, get_flow_data
 
@@ -78,6 +79,28 @@ def _snapshot_now() -> dict:
     }
 
 
+def _derive_finished_from_range_product_ids(session, start_day: date, end_day: date) -> tuple[int, float]:
+    """
+    业务口径：一个成品编号=一件。
+    周报/月报优先按编号前缀（MMDD-）累计件数，避免受批次字段口径变化影响。
+    """
+    cur = start_day
+    total_pcs = 0
+    total_m3 = 0.0
+    while cur <= end_day:
+        prefix = cur.strftime("%m%d-")
+        rows = (
+            session.query(InventoryProduct.product_id, InventoryProduct.volume)
+            .filter(InventoryProduct.product_id.like(f"{prefix}%"))
+            .all()
+        )
+        total_pcs += len(rows)
+        for _, volume in rows:
+            total_m3 += _to_float(volume, 0.0)
+        cur += timedelta(days=1)
+    return total_pcs, total_m3
+
+
 def _build_range_report(start_day: date, end_day: date, period_type: str, period_key: str) -> dict:
     start_iso = f"{start_day.strftime('%Y-%m-%d')}T00:00:00"
     end_iso = f"{end_day.strftime('%Y-%m-%d')}T23:59:59"
@@ -92,8 +115,14 @@ def _build_range_report(start_day: date, end_day: date, period_type: str, period
         product_rows = _between(session, ProductBatch, start_iso, end_iso)
         byproduct_rows = _between(session, ByproductRecord, start_iso, end_iso)
         second_rows = _between(session, FlowSecondSortRecord, start_iso, end_iso, time_field="time")
+        id_finished_pcs, id_finished_m3 = _derive_finished_from_range_product_ids(session, start_day, end_day)
     finally:
         session.close()
+
+    batch_finished_pcs = sum(_to_int(r.product_count) for r in product_rows)
+    batch_finished_m3 = round(sum(_to_float(r.total_volume) for r in product_rows), 3)
+    finished_pcs = id_finished_pcs if id_finished_pcs > 0 else batch_finished_pcs
+    finished_m3 = round(id_finished_m3, 3) if id_finished_m3 > 0 else batch_finished_m3
 
     report = {
         "type": str(period_type or "weekly"),
@@ -112,8 +141,8 @@ def _build_range_report(start_day: date, end_day: date, period_type: str, period
             "sort_trays": sum(_to_int(r.sort_trays) for r in sort_rows),
             "kiln_load_trays": sum(_to_int(r.tray_count) for r in tray_rows),
             "secondary_trays": sum(_to_int(r.trays) for r in second_rows),
-            "finished_pcs": sum(_to_int(r.product_count) for r in product_rows),
-            "finished_m3": round(sum(_to_float(r.total_volume) for r in product_rows), 3),
+            "finished_pcs": finished_pcs,
+            "finished_m3": finished_m3,
             "bark_sale_ks": round(sum(_to_float(r.bark_sale_amount) for r in byproduct_rows), 2),
         },
         "counts": {
@@ -190,6 +219,46 @@ def get_report(period: str, key: str | None = None) -> dict | None:
         return arr[0]
     finally:
         session.close()
+
+
+def _week_range_from_key(key: str) -> tuple[date, date]:
+    text = str(key or "").strip()
+    m = text.split("-W")
+    if len(m) != 2:
+        raise ValueError("invalid weekly key")
+    year = int(m[0])
+    week = int(m[1])
+    monday = date.fromisocalendar(year, week, 1)
+    saturday = monday + timedelta(days=5)
+    return monday, saturday
+
+
+def _month_range_from_key(key: str) -> tuple[date, date]:
+    text = str(key or "").strip()
+    first = datetime.strptime(f"{text}-01", "%Y-%m-%d").date()
+    first_next = (first.replace(day=1) + timedelta(days=32)).replace(day=1)
+    last = first_next - timedelta(days=1)
+    return first, last
+
+
+def rebuild_period_report(period: str, key: str) -> dict:
+    period_name = str(period or "").strip().lower()
+    key_text = str(key or "").strip()
+    if period_name not in ("weekly", "monthly"):
+        raise ValueError("invalid period")
+    if not key_text:
+        raise ValueError("empty key")
+
+    if period_name == "weekly":
+        start, end = _week_range_from_key(key_text)
+        report = _build_range_report(start, end, "weekly", key_text)
+        _upsert_report(WEEKLY_REPORTS_KEY, report)
+        return report
+
+    start, end = _month_range_from_key(key_text)
+    report = _build_range_report(start, end, "monthly", key_text)
+    _upsert_report(MONTHLY_REPORTS_KEY, report)
+    return report
 
 
 def ensure_period_reports_generated(now: datetime | None = None) -> dict:

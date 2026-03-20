@@ -1,0 +1,99 @@
+    <script>
+        document.getElementById('addUserForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('newUsername').value;
+            const password = document.getElementById('newPassword').value;
+            const role = document.getElementById('newRole').value;
+            fetch('/admin/add_user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'username=' + encodeURIComponent(username) +
+                      '&password=' + encodeURIComponent(password) +
+                      '&role=' + encodeURIComponent(role)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.error || '添加失败');
+                }
+            })
+            .catch(() => alert('添加失败'));
+        });
+        
+        function deleteUser(userId) {
+            if (confirm('确定要删除这个用户吗？')) {
+                fetch('/admin/delete_user/' + userId, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert(data.error || '删除失败');
+                    }
+                })
+                .catch(() => alert('删除失败'));
+            }
+        }
+
+        function changePassword(userId, username) {
+            const p1 = prompt('请输入用户 ' + username + ' 的新密码（至少8位）:');
+            if (p1 === null) return;
+            const nextPassword = (p1 || '').trim();
+            if (nextPassword.length < 8) {
+                alert('密码长度至少 8 位');
+                return;
+            }
+            const p2 = prompt('请再次输入新密码:');
+            if (p2 === null) return;
+            if (nextPassword !== (p2 || '').trim()) {
+                alert('两次输入的密码不一致');
+                return;
+            }
+
+            fetch('/admin/reset_password/' + userId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'password=' + encodeURIComponent(nextPassword)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('密码已修改');
+                } else {
+                    alert(data.error || '修改失败');
+                }
+            })
+            .catch(() => alert('修改失败'));
+        }
+
+        function unlockUser(userId, username) {
+            if (!confirm('确认解锁用户 ' + username + ' 吗？')) return;
+            fetch('/admin/unlock_user/' + userId, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('账号已解锁');
+                } else {
+                    alert(data.error || '解锁失败');
+                }
+            })
+            .catch(() => alert('解锁失败'));
+        }
+
+        function clearTrustedIps(userId, username) {
+            if (!confirm('确认清除用户 ' + username + ' 的外网IP信任记录吗？')) return;
+            fetch('/admin/clear_trusted_ips/' + userId, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('已清除 ' + (data.cleared || 0) + ' 条外网IP信任记录');
+                    location.reload();
+                } else {
+                    alert(data.error || '清除失败');
+                }
+            })
+            .catch(() => alert('清除失败'));
+        }
+    </script>

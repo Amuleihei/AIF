@@ -1,0 +1,144 @@
+    <script>
+        const SCROLL_STORE_KEY = 'aif_web_scroll_y';
+
+        function storeScrollPosition() {
+            try {
+                sessionStorage.setItem(SCROLL_STORE_KEY, String(window.scrollY || 0));
+            } catch (e) {}
+        }
+
+        function restoreScrollPosition() {
+            try {
+                const raw = sessionStorage.getItem(SCROLL_STORE_KEY);
+                if (raw === null) return;
+                sessionStorage.removeItem(SCROLL_STORE_KEY);
+                const y = parseInt(raw, 10);
+                if (!Number.isNaN(y)) {
+                    setTimeout(function() { window.scrollTo(0, y); }, 0);
+                }
+            } catch (e) {}
+        }
+
+        function replacePageHtml(html) {
+            storeScrollPosition();
+            document.open();
+            document.write(html);
+            document.close();
+        }
+
+        function changeLanguage(lang) {
+            const url = new URL(window.location);
+            url.searchParams.set('lang', lang);
+            window.location.href = url.toString();
+        }
+
+        function shipmentStatusClass(status) {
+            if (status === '待发车' || status === '去仰光途中') return 'pending';
+            if (status === '仰光仓已到') return 'transit';
+            if (status === '已从仰光出港' || status === '中国港口已到') return 'signed';
+            if (status === '异常') return 'exception';
+            return '';
+        }
+
+        function renderOverviewRadar() {
+            const canvas = document.getElementById('overview-radar-canvas');
+            if (!canvas || !canvas.getContext) return;
+            const labels = Array.isArray(OVERVIEW_RADAR_LABELS) ? OVERVIEW_RADAR_LABELS.slice() : [];
+            const radar = OVERVIEW_RADAR && typeof OVERVIEW_RADAR === 'object' ? OVERVIEW_RADAR : {};
+            const datasets = [
+                {name:'{{ texts.get("overview_radar_legend_current", "当前") }}', vals: radar.current || [], color:'rgba(37,99,235,0.85)', fill:'rgba(37,99,235,0.12)'},
+                {name:'{{ texts.get("overview_radar_legend_day", "日均") }}', vals: radar.day || [], color:'rgba(16,185,129,0.85)', fill:'rgba(16,185,129,0.12)'},
+                {name:'{{ texts.get("overview_radar_legend_week", "周均") }}', vals: radar.week || [], color:'rgba(234,88,12,0.85)', fill:'rgba(234,88,12,0.10)'},
+                {name:'{{ texts.get("overview_radar_legend_month", "月均") }}', vals: radar.month || [], color:'rgba(148,163,184,0.95)', fill:'rgba(148,163,184,0.08)'}
+            ];
+            if (labels.length < 3) return;
+
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const cx = w * 0.36;
+            const cy = h * 0.52;
+            const radius = Math.min(w, h) * 0.34;
+            const n = labels.length;
+            const start = -Math.PI / 2;
+            const angle = (Math.PI * 2) / n;
+
+            ctx.strokeStyle = '#d1d5db';
+            ctx.lineWidth = 1;
+            for (let lv = 1; lv <= 5; lv += 1) {
+                const r = (radius * lv) / 5;
+                ctx.beginPath();
+                for (let i = 0; i < n; i += 1) {
+                    const a = start + i * angle;
+                    const x = cx + Math.cos(a) * r;
+                    const y = cy + Math.sin(a) * r;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = '#cbd5e1';
+            for (let i = 0; i < n; i += 1) {
+                const a = start + i * angle;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+                ctx.stroke();
+                const x = cx + Math.cos(a) * (radius + 18);
+                const y = cy + Math.sin(a) * (radius + 18);
+                const t = String(labels[i] || '');
+                ctx.fillStyle = '#334155';
+                ctx.font = '14px sans-serif';
+                const m = ctx.measureText(t).width;
+                ctx.fillText(t, x - m / 2, y + 5);
+            }
+
+            datasets.forEach((ds) => {
+                ctx.beginPath();
+                for (let i = 0; i < n; i += 1) {
+                    const v = Math.max(0, Math.min(100, Number((ds.vals || [])[i] || 0)));
+                    const r = radius * v / 100;
+                    const a = start + i * angle;
+                    const x = cx + Math.cos(a) * r;
+                    const y = cy + Math.sin(a) * r;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.fillStyle = ds.fill;
+                ctx.strokeStyle = ds.color;
+                ctx.lineWidth = 2;
+                ctx.fill();
+                ctx.stroke();
+            });
+
+            const lgx = w - 18;
+            const lgy = 20;
+            datasets.forEach((ds, idx) => {
+                const y = lgy + idx * 20;
+                ctx.fillStyle = ds.color;
+                ctx.fillRect(lgx - 14, y - 10, 14, 14);
+                ctx.fillStyle = '#0f172a';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(ds.name, lgx - 20, y + 2);
+                ctx.textAlign = 'left';
+            });
+        }
+
+        window.onerror = function(message, source, lineno, colno) {
+            try {
+                var img = new Image();
+                img.src = '/api/client_log?msg=' + encodeURIComponent(String(message || '')) +
+                    '&src=' + encodeURIComponent(String(source || '')) +
+                    '&line=' + encodeURIComponent(String(lineno || 0)) +
+                    '&col=' + encodeURIComponent(String(colno || 0)) +
+                    '&t=' + Date.now();
+            } catch (e) {}
+            return false;
+        };
+    </script>

@@ -1,0 +1,13 @@
+body { margin: 0; padding: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+h1 { margin-bottom: 30px; }
+.form-group { margin-bottom: 20px; }
+label { display: block; margin-bottom: 5px; color: #555; font-weight: bold; }
+input[type="text"], input[type="password"] { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
+input[type="text"]:focus, input[type="password"]:focus { border-color: #667eea; outline: none; }
+button { width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background 0.3s; }
+button:hover { background: #5a6fd8; }
+.alert { padding: 10px; margin-bottom: 20px; border-radius: 5px; }
+.alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+.language-selector { text-align: right; margin-bottom: 20px; }
+.language-selector select { padding: 5px; border-radius: 3px; }

@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta
+from sqlalchemy import text
 
 from web.models import (
     Session,
@@ -569,6 +570,7 @@ def _sync_kilns_payload_into_tables(session, kilns: dict):
         state.status = str(item.get("status", "empty") or "empty")
         state.start = str(item.get("start", "") or "")
         state.dry_start = str(item.get("dry_start", "") or "")
+        state.status_changed_at = _to_int(item.get("status_changed_at"), 0)
         state.completed_time = str(item.get("completed_time", "") or "")
         state.last_volume = _to_float(item.get("last_volume"), 0.0)
         state.unloaded_count = _to_int(item.get("unloaded_count"), 0)
@@ -628,6 +630,7 @@ def _build_kilns_from_tables(session):
             "status": str(st.status or "empty"),
             "start": str(st.start or "") or None,
             "dry_start": _to_int(st.dry_start, None) if str(st.dry_start or "").isdigit() else (str(st.dry_start or "") or None),
+            "status_changed_at": _to_int(st.status_changed_at, 0),
             "completed_time": str(st.completed_time or "") or None,
             "last_volume": _to_float(st.last_volume, 0.0),
             "unloaded_count": _to_int(st.unloaded_count, 0),
@@ -876,6 +879,10 @@ def _migrate_from_legacy_json_once(session):
 def ensure_migrated():
     session = Session()
     try:
+        with session.bind.begin() as conn:
+            cols = [str(r[1] or "") for r in conn.execute(text("PRAGMA table_info(kiln_states)")).fetchall()]
+            if cols and "status_changed_at" not in cols:
+                conn.execute(text("ALTER TABLE kiln_states ADD COLUMN status_changed_at INTEGER DEFAULT 0"))
         _migrate_from_legacy_json_once(session)
         for kid in KILN_IDS:
             if not session.query(KilnState).filter_by(kiln_id=kid).first():

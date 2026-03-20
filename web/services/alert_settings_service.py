@@ -8,6 +8,7 @@ DEFAULT_ALERT_SETTINGS = {
     "sorting_stock_tray_min": 20,
     "kiln_done_stock_tray_max": 200,
     "product_shippable_tray_min": 300,
+    "kiln_max_trays": 70,
 }
 
 
@@ -42,6 +43,9 @@ def get_alert_settings() -> dict:
             if not row:
                 continue
             raw = str(row.value or "").strip()
+            if field == "kiln_max_trays":
+                out[field] = max(1, _to_int(raw, out[field]))
+                continue
             if field.endswith("_min") and "tray" in field:
                 out[field] = max(0, _to_int(raw, out[field]))
             elif field.endswith("_max") and "tray" in field:
@@ -61,6 +65,7 @@ def save_alert_settings(values: dict) -> dict:
         "sorting_stock_tray_min": max(0, _to_int(data.get("sorting_stock_tray_min"), DEFAULT_ALERT_SETTINGS["sorting_stock_tray_min"])),
         "kiln_done_stock_tray_max": max(0, _to_int(data.get("kiln_done_stock_tray_max"), DEFAULT_ALERT_SETTINGS["kiln_done_stock_tray_max"])),
         "product_shippable_tray_min": max(0, _to_int(data.get("product_shippable_tray_min"), DEFAULT_ALERT_SETTINGS["product_shippable_tray_min"])),
+        "kiln_max_trays": max(1, _to_int(data.get("kiln_max_trays"), DEFAULT_ALERT_SETTINGS["kiln_max_trays"])),
     }
 
     session = Session()

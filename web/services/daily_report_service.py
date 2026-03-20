@@ -247,7 +247,7 @@ def _derive_finished_from_daily_product_ids(session, day_obj: date) -> tuple[int
     """
     prefix = _daily_product_id_prefix(day_obj)
     rows = (
-        session.query(InventoryProduct.product_id, InventoryProduct.spec)
+        session.query(InventoryProduct.product_id, InventoryProduct.volume)
         .filter(InventoryProduct.product_id.like(f"{prefix}%"))
         .all()
     )
@@ -255,8 +255,8 @@ def _derive_finished_from_daily_product_ids(session, day_obj: date) -> tuple[int
         return 0, 0.0
     pcs = len(rows)
     m3 = 0.0
-    for _, spec in rows:
-        m3 += _calc_one_piece_volume_from_spec(str(spec or ""))
+    for _, volume in rows:
+        m3 += _safe_float(volume, 0.0)
     return pcs, m3
 
 
@@ -362,15 +362,10 @@ def build_daily_report(day_text: str | None = None, lang: str = "zh") -> dict:
     dip_trays = sum(_safe_int(r.dip_trays) for r in dip_rows)
     sort_trays = sum(_safe_int(r.sort_trays) for r in sort_rows)
     kiln_load_trays = sum(_safe_int(r.tray_count) for r in tray_rows)
-    # 业务口径：日报“成品件数”优先按当日成品入库批次统计，
-    # 不再依赖编号前缀，避免非 MMDD- 编号被遗漏。
-    finished_pcs = sum(_safe_int(r.product_count) for r in product_rows)
-    finished_volume_m3 = sum(_safe_float(r.total_volume) for r in product_rows)
-    # 兼容历史异常：若当日批次数据为空，才回退到按当日编号推导。
-    if finished_pcs <= 0 and id_finished_pcs > 0:
-        finished_pcs = id_finished_pcs
-        if id_finished_m3 > 0:
-            finished_volume_m3 = id_finished_m3
+    # 业务口径：成品件数按“当日成品编号条数”统计（一个编号=一件）。
+    # 兼容：若当日编号无法推导（例如历史非日期编号），再回退批次汇总。
+    finished_pcs = id_finished_pcs if id_finished_pcs > 0 else sum(_safe_int(r.product_count) for r in product_rows)
+    finished_volume_m3 = id_finished_m3 if id_finished_m3 > 0 else sum(_safe_float(r.total_volume) for r in product_rows)
 
     secondary_trays = max(
         sum(_safe_int(r.trays) for r in second_sort_rows),

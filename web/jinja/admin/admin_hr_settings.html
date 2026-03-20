@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.get('hr_settings_title', 'HR设置') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/admin_hr_settings.css') }}">
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('admin_root') }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+        <a href="{{ url_for('admin_users') }}" class="link-inline">{{ texts.get('user_management', '用户管理') }}</a>
+        <a href="{{ url_for('admin_audit_logs') }}" class="link-inline">{{ texts.get('audit_logs', '审计日志') }}</a>
+        <a href="{{ url_for('admin_alert_settings') }}" class="link-inline">{{ texts.get('alert_threshold', '预警阈值') }}</a>
+        <h1>{{ texts.get('hr_settings_heading', 'HR组织与薪资设置') }}</h1>
+
+        <div class="grid">
+            <div class="card">
+                <div class="k">{{ texts.get('hr_employee_total', '员工总数') }}</div>
+                <div class="v">{{ data.employee_total }}</div>
+            </div>
+            <div class="card">
+                <div class="k">{{ texts.get('hr_employee_active', '在岗人数') }}</div>
+                <div class="v">{{ data.employee_active }}</div>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ url_for('admin_hr_settings') }}" id="hr-settings-form">
+            <div class="row">
+                <label>{{ texts.get('hr_team_position_section', '班组与岗位（像填表一样即可）') }}</label>
+                <table class="tbl" id="team-table">
+                    <thead>
+                        <tr><th style="width:28%;">{{ texts.get('hr_team_name', '班组名称') }}</th><th>{{ texts.get('hr_position_csv', '岗位（用逗号分开）') }}</th><th style="width:84px;">{{ texts.get('actions', '操作') }}</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data.team_rows %}
+                        <tr>
+                            <td><input type="text" name="team_name" value="{{ row.name }}"></td>
+                            <td><input type="text" name="team_positions" value="{{ row.positions_text }}"></td>
+                            <td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get('delete', '删除') }}</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="row-actions">
+                    <button type="button" class="btn-mini btn-add" onclick="addTeamRow()">+ {{ texts.get('hr_add_team', '新增班组') }}</button>
+                </div>
+            </div>
+
+            <div class="row">
+                <label>{{ texts.get('hr_salary_rule_section', '薪资类型与发薪规则') }}</label>
+                <table class="tbl" id="salary-table">
+                    <thead>
+                        <tr><th style="width:20%;">{{ texts.get('hr_salary_type', '薪资类型') }}</th><th style="width:20%;">{{ texts.get('hr_salary_cycle', '发薪周期') }}</th><th>{{ texts.get('remark_label', '说明') }}</th><th style="width:84px;">{{ texts.get('actions', '操作') }}</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data.salary_rows %}
+                        <tr>
+                            <td><input type="text" name="salary_type" value="{{ row.salary_type }}"></td>
+                            <td>
+                                <select name="salary_cycle">
+                                    <option value="weekly" {% if row.payout_cycle == 'weekly' %}selected{% endif %}>{{ texts.get('hr_cycle_weekly', 'weekly（按周）') }}</option>
+                                    <option value="semi_monthly" {% if row.payout_cycle == 'semi_monthly' %}selected{% endif %}>{{ texts.get('hr_cycle_semi_monthly', 'semi_monthly（15天）') }}</option>
+                                    <option value="monthly" {% if row.payout_cycle == 'monthly' %}selected{% endif %}>{{ texts.get('hr_cycle_monthly', 'monthly（按月）') }}</option>
+                                </select>
+                            </td>
+                            <td><input type="text" name="salary_desc" value="{{ row.desc }}"></td>
+                            <td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get('delete', '删除') }}</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="row-actions">
+                    <button type="button" class="btn-mini btn-add" onclick="addSalaryRow()">+ {{ texts.get('hr_add_salary_type', '新增薪资类型') }}</button>
+                </div>
+            </div>
+
+            <div class="row">
+                <label>{{ texts.get('hr_overtime_setting_section', '加班倍率设置') }}</label>
+                <table class="tbl" id="ot-table">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.get('hr_overtime_ratio', '加班倍率') }}</th>
+                            <th style="width:84px;">{{ texts.get('actions', '操作') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data.overtime_rows %}
+                        <tr>
+                            <td><input type="number" step="0.1" min="0.1" name="ot_multiplier_option" value="{{ row.multiplier }}"></td>
+                            <td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get('delete', '删除') }}</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="row-actions">
+                    <button type="button" class="btn-mini btn-add" onclick="addOtRow()">+ {{ texts.get('hr_add_ot_ratio', '新增倍率') }}</button>
+                </div>
+                <div class="row-actions">
+                    <label style="margin:0; font-weight:normal;">{{ texts.get('hr_default_ot_ratio', '默认加班倍率') }}</label>
+                    <input type="number" step="0.1" min="0.1" name="ot_default_multiplier" value="{{ data.overtime_default_multiplier }}" style="max-width:180px;">
+                </div>
+            </div>
+
+            <div class="row">
+                <label>{{ texts.get('hr_rule_notes', '规则备注（每行一条）') }}</label>
+                <textarea class="notes" name="notes_text">{{ data.notes_text }}</textarea>
+            </div>
+
+            <input type="hidden" name="teams_json" value="">
+            <input type="hidden" name="salary_types_json" value="">
+            <input type="hidden" name="teams_text" value="">
+            <input type="hidden" name="salary_types_text" value="">
+
+            <button class="btn" type="submit">{{ texts.get('hr_save_settings', '保存HR设置') }}</button>
+            {% if result_msg %}
+            <div class="msg-ok">{{ result_msg }}</div>
+            {% endif %}
+            {% if error_msg %}
+            <div class="msg-err">{{ error_msg }}</div>
+            {% endif %}
+        </form>
+    </div>
+    {% include 'partials/admin_hr_settings_script.html' %}
+</body>
+</html>

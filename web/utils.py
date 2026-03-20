@@ -17,7 +17,7 @@ MIGRATION_KEY = "migration_v2_done"
 
 def _build_inventory_alerts(lang: str, stock: dict) -> list[dict]:
     cfg = get_alert_settings()
-    return evaluate_inventory_alerts(stock=stock, threshold_cfg=cfg)
+    return evaluate_inventory_alerts(stock=stock, threshold_cfg=cfg, lang=lang)
 
 
 def _fmt_dt(ts: float | None) -> str:
@@ -136,12 +136,20 @@ def get_stock_data(lang='zh'):
     waste_segment_bag_stock = 0
     bark_stock_m3 = 0.0
     shipping_summary = {'去仰光途中': 0, '仰光仓已到': 0, '已从仰光出港': 0, '异常': 0}
-    overview_radar_labels = ["原木保障", "前段均衡", "中段流速", "积压健康", "成品健康"]
+    lang_pack = LANGUAGES.get(lang, LANGUAGES["zh"])
+    overview_radar_labels = [
+        str(lang_pack.get("radar_axis_raw_security", LANGUAGES["zh"].get("radar_axis_raw_security", "原木保障"))),
+        str(lang_pack.get("radar_axis_front_balance", LANGUAGES["zh"].get("radar_axis_front_balance", "前段均衡"))),
+        str(lang_pack.get("radar_axis_middle_flow", LANGUAGES["zh"].get("radar_axis_middle_flow", "中段流速"))),
+        str(lang_pack.get("radar_axis_backlog_health", LANGUAGES["zh"].get("radar_axis_backlog_health", "积压健康"))),
+        str(lang_pack.get("radar_axis_product_health", LANGUAGES["zh"].get("radar_axis_product_health", "成品健康"))),
+        str(lang_pack.get("radar_axis_kiln_efficiency", LANGUAGES["zh"].get("radar_axis_kiln_efficiency", "窑效率"))),
+    ]
     overview_radar = {
-        "current": [0, 0, 0, 0, 0],
-        "day": [0, 0, 0, 0, 0],
-        "week": [0, 0, 0, 0, 0],
-        "month": [0, 0, 0, 0, 0],
+        "current": [0, 0, 0, 0, 0, 0],
+        "day": [0, 0, 0, 0, 0, 0],
+        "week": [0, 0, 0, 0, 0, 0],
+        "month": [0, 0, 0, 0, 0, 0],
     }
 
     flow = get_flow_data()
@@ -178,6 +186,7 @@ def get_stock_data(lang='zh'):
             if status == 'ready_unload':
                 status = 'ready'
                 kiln_data['status'] = 'ready'
+                kiln_data['status_changed_at'] = int(time.time())
                 kilns_changed = True
             status_display = {
                 'empty': LANGUAGES[lang]['empty'],
@@ -216,6 +225,7 @@ def get_stock_data(lang='zh'):
                 if elapsed >= 120 * 3600:
                     status = 'ready'
                     kiln_data['status'] = 'ready'
+                    kiln_data['status_changed_at'] = int(time.time())
                     kilns_changed = True
                 remaining = max(0, 120 * 3600 - elapsed)  # 120小时
                 elapsed_hours = elapsed // 3600
@@ -231,6 +241,37 @@ def get_stock_data(lang='zh'):
                     'ready': LANGUAGES[lang]['ready'],
                     'completed': LANGUAGES[lang]['completed']
                 }.get(status, status)
+            now_ts = int(time.time())
+            changed_raw = kiln_data.get('status_changed_at')
+            changed_ts = 0
+            if isinstance(changed_raw, (int, float)):
+                changed_ts = int(changed_raw)
+            elif isinstance(changed_raw, str) and changed_raw.strip():
+                text = changed_raw.strip()
+                try:
+                    if text.isdigit():
+                        changed_ts = int(text)
+                    else:
+                        from datetime import datetime
+                        changed_ts = int(datetime.fromisoformat(text.replace('Z', '+00:00')).timestamp())
+                except Exception:
+                    changed_ts = 0
+            if changed_ts <= 0:
+                if status == 'drying':
+                    base = kiln_data.get('dry_start') or kiln_data.get('start')
+                    try:
+                        if isinstance(base, str):
+                            from datetime import datetime
+                            changed_ts = int(datetime.fromisoformat(base.replace('Z', '+00:00')).timestamp())
+                        else:
+                            changed_ts = int(float(base)) if base is not None else now_ts
+                    except Exception:
+                        changed_ts = now_ts
+                else:
+                    changed_ts = now_ts
+                    kiln_data['status_changed_at'] = changed_ts
+                    kilns_changed = True
+            status_duration_hours = max(0.0, (now_ts - int(changed_ts)) / 3600.0)
             # 主页与日报口径统一：烘干中仅显示时间；其余状态显示托数。
             if status != 'drying' and total_trays > 0:
                 tray_progress = f"{LANGUAGES[lang]['total_trays']}{total_trays} {LANGUAGES[lang]['remaining_trays']}{remaining_trays}{LANGUAGES[lang]['trays']}"
@@ -246,6 +287,7 @@ def get_stock_data(lang='zh'):
                 'remaining_trays': remaining_trays,
                 'in_kiln_trays': trays_in_kiln,
                 'remaining_kiln_trays': remaining_trays,
+                'status_duration_hours': round(status_duration_hours, 2),
             }
         else:
             kiln_status[kiln_id] = {
@@ -258,23 +300,28 @@ def get_stock_data(lang='zh'):
                 'remaining_trays': 0,
                 'in_kiln_trays': 0,
                 'remaining_kiln_trays': 0,
+                'status_duration_hours': 0.0,
             }
 
     if kilns_changed:
         save_kilns_data(kilns)
 
     try:
-        alert_payload = get_alert_center_payload(limit_recent=20)
+        alert_payload = get_alert_center_payload(limit_recent=20, lang=lang)
         efficiency = alert_payload.get("efficiency", {}) if isinstance(alert_payload, dict) else {}
-        labels = efficiency.get("radar_labels", []) if isinstance(efficiency, dict) else []
         radar = efficiency.get("radar", {}) if isinstance(efficiency, dict) else {}
+        payload_labels = efficiency.get("radar_labels", []) if isinstance(efficiency, dict) else []
+        if isinstance(payload_labels, list) and len(payload_labels) >= 5:
+            overview_radar_labels = [str(x or "") for x in payload_labels]
+        radar_dim = max(5, len(overview_radar_labels))
         def _radar_vals(key: str) -> list[float]:
             vals = radar.get(key, []) if isinstance(radar, dict) else []
-            if not isinstance(vals, list) or len(vals) < 5:
-                return [0.0, 0.0, 0.0, 0.0, 0.0]
-            return [max(0.0, min(100.0, float(x or 0))) for x in vals[:5]]
-        if isinstance(labels, list) and len(labels) >= 5:
-            overview_radar_labels = [str(x) for x in labels[:5]]
+            if not isinstance(vals, list):
+                return [0.0 for _ in range(radar_dim)]
+            out = [max(0.0, min(100.0, float(x or 0))) for x in vals[:radar_dim]]
+            if len(out) < radar_dim:
+                out.extend([0.0] * (radar_dim - len(out)))
+            return out
         overview_radar = {
             "current": _radar_vals("current"),
             "day": _radar_vals("day"),
@@ -307,6 +354,11 @@ def get_stock_data(lang='zh'):
         'texts': LANGUAGES[lang],
         'period_reports': get_period_report_links(),
     }
+    try:
+        cfg = get_alert_settings()
+        stock_payload['kiln_max_trays'] = max(1, _to_int((cfg or {}).get('kiln_max_trays'), 70))
+    except Exception:
+        stock_payload['kiln_max_trays'] = 70
     stock_payload['alerts'] = _build_inventory_alerts(lang, stock_payload)
     return stock_payload
 
@@ -324,7 +376,12 @@ def update_kiln_status(kiln_id, status, trays=None):
         kilns[kiln_id] = {}
 
     kiln = kilns[kiln_id]
+    prev_status = str(kiln.get('status', '') or '')
     kiln['status'] = status
+    if prev_status != str(status):
+        kiln['status_changed_at'] = int(time.time())
+    elif not kiln.get('status_changed_at'):
+        kiln['status_changed_at'] = int(time.time())
     if trays is not None:
         kiln['trays'] = trays
     kiln.pop('manual_elapsed_hours', None)

@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/main.css') }}">
+    {% include 'partials/main_head_script.html' %}
+</head>
+<body>
+    <div class="container">
+        <!-- 语言选择器 -->
+        <div style="text-align: right; margin-bottom: 10px;">
+            <label for="lang-select">{{ texts.language }}:</label>
+            <select id="lang-select" onchange="changeLanguage(this.value)">
+                <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ texts.chinese }}</option>
+                <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ texts.english }}</option>
+                <option value="my" {% if lang == 'my' %}selected{% endif %}>{{ texts.burmese }}</option>
+            </select>
+        </div>
+
+        <!-- 用户信息 -->
+        <div class="user-info">
+            {{ texts.login }}: {{ current_user.username }} |
+            {% set role = (current_user.role or '')|lower %}
+            {% set can_hr_employees = current_user.has_permission('admin') or role in ['finance', 'stats'] %}
+            {% if current_user.has_permission('admin') %}
+            <a href="{{ url_for('admin_root', lang=lang) }}">{{ texts.get('admin_overview_link', texts.manage_link) }}</a> |
+            <a href="{{ url_for('admin_alert_center', lang=lang) }}">{{ texts.get('alert_center_link', 'Alert Center') }}</a> |
+            {% endif %}
+            {% if can_hr_employees %}
+            <a href="{{ url_for('admin_hr_employees', lang=lang) }}">{{ texts.get('employee_mgmt_link', 'Employee Management') }}</a> |
+            {% endif %}
+            <a href="{{ url_for('logout') }}" class="logout-btn">{{ texts.logout }}</a>
+        </div>
+
+        <h1>🏭 {{ texts.title }}</h1>
+        <div id="entry-reminder-strip" class="entry-reminder-strip">
+            <strong>{{ texts.entry_reminder_title }}</strong>
+            <span id="entry-reminder-text"></span>
+        </div>
+
+        {% if alerts %}
+        <div class="section" style="border-left:4px solid #dc2626;">
+            <h2 style="color:#b91c1c;">⚠️ {{ texts.get('system_health_warn', '预警') }}</h2>
+            <div style="display:grid; gap:6px;">
+                {% for item in alerts %}
+                <div style="padding:8px 10px; border:1px solid #fee2e2; border-radius:8px; background:#fff1f2; font-size:13px;">
+                    {{ item.text }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 工厂总览 -->
+        <div class="section">
+            <div style="display:flex; align-items:center; gap:10px; justify-content:space-between; flex-wrap:wrap;">
+                <h2 style="margin:0;">📊 {{ texts.factory_overview }}</h2>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button type="button" onclick="openDailyReportModal()" style="background:#198754;">{{ texts.view_daily_report }}</button>
+                    {% if period_reports.weekly.generated %}
+                    <a href="{{ period_reports.weekly.url }}&lang={{ lang }}" style="padding:7px 10px; border-radius:6px; background:#e0f2fe; color:#075985; text-decoration:none; font-size:13px;">{{ texts.get('period_weekly_label', '周报') }} {{ period_reports.weekly.key }}</a>
+                    {% endif %}
+                    {% if period_reports.monthly.generated %}
+                    <a href="{{ period_reports.monthly.url }}&lang={{ lang }}" style="padding:7px 10px; border-radius:6px; background:#dcfce7; color:#166534; text-decoration:none; font-size:13px;">{{ texts.get('period_monthly_label', '月报') }} {{ period_reports.monthly.key }}</a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="overview-grid">
+                <div class="overview-col">
+                    <p><strong>{{ texts.stage_stock }}</strong></p>
+                    <p>{{ texts.log_stock }} {{ "%.4f"|format(log_stock) }} {{ texts.unit_mt }}</p>
+                    <p>{{ texts.current_saw_stock }} {{ saw_stock }} {{ texts.unit_tray }}</p>
+                    <p>{{ texts.current_dip_stock }} {{ dip_stock }} {{ texts.unit_tray }}</p>
+                    <p>{{ texts.pending_kiln_stock }} {{ sorting_stock }} {{ texts.unit_kiln_tray }}</p>
+                    <p>{{ texts.kiln_done_stock_label }} {{ kiln_done_stock }} {{ texts.unit_kiln_tray }}</p>
+                    <p>{{ texts.product_stock_label }} {{ product_count }} {{ texts.unit_piece }}（{{ "%.2f"|format(product_m3) }} m³）</p>
+                    <p>{{ texts.current_bark_stock }} {{ "%.2f"|format(bark_stock_m3) }} {{ texts.unit_m3 }}</p>
+                    <p>{{ texts.current_dust_stock }} {{ dust_bag_stock }} {{ texts.unit_bag }}</p>
+                </div>
+
+                <div class="overview-stack">
+                    <div class="overview-col">
+                        <p><strong>{{ texts.kiln_overview_label }}</strong></p>
+                        {% for kiln_id in ['A', 'B', 'C', 'D'] %}
+                        <p>
+                            {{ kiln_id }} {{ texts.kiln_label }}:
+                            <span class="status {{ kiln_status[kiln_id].status }}">{{ kiln_status[kiln_id].status_display }}</span>
+                            {% if kiln_status[kiln_id].progress %}
+                            - {{ kiln_status[kiln_id].progress }}
+                            {% endif %}
+                        </p>
+                        {% endfor %}
+                    </div>
+
+                    <div class="overview-col">
+                        <p><strong>{{ texts.logistics_info_label }}</strong></p>
+                        <p>{{ texts.shipping_pending }}: {{ shipping_summary['去仰光途中'] or 0 }} {{ texts.unit_order }}</p>
+                        <p>{{ texts.shipping_in_transit }}: {{ shipping_summary['仰光仓已到'] or 0 }} {{ texts.unit_order }}</p>
+                        <p>{{ texts.shipping_signed }}: {{ shipping_summary['已从仰光出港'] or 0 }} {{ texts.unit_order }}</p>
+                        <p>{{ texts.shipping_exception }}: {{ shipping_summary['异常'] or 0 }} {{ texts.unit_order }}</p>
+                    </div>
+                </div>
+
+                <div class="overview-radar-card">
+                    <p><strong>{{ texts.get('overview_eff_radar_label', '流程效率雷达图（当前/日/周/月）') }}</strong></p>
+                    <div class="overview-radar-wrap">
+                        <canvas id="overview-radar-canvas" width="460" height="280"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:10px; padding:10px; border:1px solid #dbe3ef; border-radius:8px; background:#f8fbff;">
+                <p style="margin:0 0 6px;"><strong>🩺 {{ texts.get('system_health', '系统健康') }}</strong>
+                    <span class="status {{ 'ready' if system_health.status == 'healthy' else 'unloading' }}">
+                        {{ texts.get('system_health_ok', '正常') if system_health.status == 'healthy' else texts.get('system_health_warn', '告警') }}
+                    </span>
+                </p>
+                <p style="margin:4px 0;">{{ texts.get('system_health_db', '数据库') }}: {{ texts.get('system_health_state_ok', 'OK') if system_health.db_exists else texts.get('system_health_state_missing', 'MISSING') }} | {{ system_health.db_size_mb }} MB</p>
+                <p style="margin:4px 0;">{{ texts.get('system_health_migration', '迁移') }}: {{ texts.get('system_health_state_done', 'DONE') if system_health.migration_done else texts.get('system_health_state_pending', 'PENDING') }} | {{ texts.get('system_health_users', '用户数') }}: {{ system_health.user_total }}</p>
+                <p style="margin:4px 0;">{{ texts.get('system_health_backup', '最近备份') }}: {{ system_health.latest_backup_at }}{% if system_health.latest_backup_file %} ({{ system_health.latest_backup_file }}){% endif %}</p>
+                <p style="margin:4px 0;">{{ texts.get('system_health_web_errors_24h', 'Web错误(24h)') }}: {{ system_health.web_errors_24h }}</p>
+                {% if system_health.weak_password_user_count > 0 %}
+                <p style="margin:4px 0; color:#b91c1c;">{{ texts.get('system_health_weak_users', '弱口令用户') }}: {{ system_health.weak_password_user_count }}</p>
+                {% endif %}
+                {% if system_health.issues %}
+                <p style="margin:4px 0; color:#b91c1c;">{{ texts.get('system_health_issues', '问题') }}: {{ system_health.issues|join(' / ') }}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="pair-grid">
+            <!-- 原木入库环节 -->
+            <div class="section">
+                <h2>{{ texts.log_section }}</h2>
+                <p>{{ texts.log_stock }} {{ "%.4f"|format(log_stock) }} {{ texts.unit_mt }}
+                {% if current_user.has_permission('admin') %}
+                    <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('log', '{{ '%.4f'|format(log_stock) }}')">{{ texts.edit_btn }}</button>
+                {% endif %}
+                </p>
+                <form method="POST" action="/submit_log_entry?lang={{ lang }}" onsubmit="return beforeSubmitLogEntryForm()">
+                    <div class="form-group">
+                        <button type="button" onclick="openLogEntryModal()">{{ texts.log_entry_modal_btn }}</button>
+                        {% if current_user.has_permission('export') %}
+                        <button type="button" onclick="openLogEntryListModal()" style="background:#0d6efd;">{{ texts.log_view_history }}</button>
+                        {% endif %}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.driver_name }}</label>
+                        <input type="text" id="log_driver_preview" readonly style="background:#f8f9fa;">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.truck_number }}</label>
+                        <input type="text" id="log_truck_preview" readonly style="background:#f8f9fa;">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.log_amount }}</label>
+                        <input type="number" id="log_amount_preview" readonly style="background:#f8f9fa;" step="0.0001"> {{ texts.unit_mt }}
+                    </div>
+                    <input type="hidden" name="truck_number" id="log_truck_hidden">
+                    <input type="hidden" name="driver_name" id="log_driver_hidden">
+                    <input type="hidden" name="log_amount" id="log_amount_hidden">
+                    <input type="hidden" name="log_size_range" id="log_size_range_hidden">
+                    <input type="hidden" name="log_price_per_mt" id="log_price_hidden">
+                    <input type="hidden" name="log_price_rules_payload" id="log_price_rules_payload_hidden">
+                    <input type="hidden" name="log_details_payload" id="log_details_payload_hidden">
+                    <button type="submit" id="submit-log-entry-btn">{{ texts.submit_log }}</button>
+                </form>
+            </div>
+
+            <!-- 锯解环节 -->
+            <div class="section">
+                <h2>🪚 {{ texts.saw_section }}</h2>
+                <p>{{ texts.current_log_stock }} {{ "%.4f"|format(log_stock) }} {{ texts.unit_mt }}</p>
+                <p>{{ texts.current_saw_stock }} {{ saw_stock }} {{ texts.unit_tray }}
+                {% if current_user.has_permission('admin') %}
+                    <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('saw', '{{ saw_stock }}')">{{ texts.edit_btn }}</button>
+                {% endif %}
+                </p>
+                <form method="POST" action="/submit_saw?lang={{ lang }}">
+                    <div class="form-group">
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <label style="margin:0; white-space:nowrap;">{{ texts.saw_daily }}</label>
+                            <input type="number" id="saw_tm_input" name="saw_tm" step="0.0001" placeholder="{{ texts.placeholder_saw_mt }}" required style="width:160px;">
+                            <span style="white-space:nowrap;">{{ texts.unit_mt }}</span>
+                            <button type="button" onclick="openSawMachineModal()">{{ texts.saw_machine_modal_btn }}</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.saw_products }}</label>
+                        <input type="number" id="saw_trays_input" name="saw_trays" placeholder="{{ texts.placeholder_tray }}" required style="width:160px;"> {{ texts.unit_tray }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.saw_bark }}</label>
+                        <input type="number" id="bark_m3_input" name="bark_m3" step="0.01" min="0" placeholder="{{ texts.placeholder_m3 }}" required style="width:160px;"> {{ texts.unit_m3 }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.saw_dust }}</label>
+                        <input type="number" id="dust_bags_input" name="dust_bags" min="0" placeholder="{{ texts.placeholder_bag }}" required style="width:160px;"> {{ texts.unit_bag }}
+                    </div>
+                    <input type="hidden" id="saw_machine_payload" name="saw_machine_payload" value="">
+                    <button type="submit">{{ texts.submit_saw }}</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="pair-grid">
+            <!-- 药浸环节 -->
+            <div class="section">
+                <h2>{{ texts.dip_section }}</h2>
+                <p>{{ texts.current_saw_stock }} {{ saw_stock }} {{ texts.unit_tray }}</p>
+                <p>{{ texts.current_dip_chem_stock }} {{ "%.2f"|format(dip_chem_bag_stock) }} {{ texts.unit_bag }}
+                {% if current_user.has_permission('admin') %}
+                    <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('dip_chem', '{{ '%.2f'|format(dip_chem_bag_stock) }}')">{{ texts.edit_btn }}</button>
+                {% endif %}
+                </p>
+                <p>{{ texts.current_dip_additive_stock }} {{ "%.2f"|format(dip_additive_kg_stock) }} {{ texts.unit_kg }}</p>
+                <form method="POST" action="/submit_dip?lang={{ lang }}">
+                    <div class="form-group">
+                        <label>{{ texts.dip_daily }}</label>
+                        <input type="number" name="dip_cans" min="0" placeholder="{{ texts.placeholder_can }}"> {{ texts.unit_can }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.dip_trays }}</label>
+                        <input type="number" name="dip_trays" min="0" placeholder="{{ texts.placeholder_tray }}"> {{ texts.unit_tray }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.dip_chemicals }}</label>
+                        <input type="number" name="dip_chemicals" step="0.01" min="0" placeholder="{{ texts.placeholder_bag }}"> {{ texts.unit_bag }}
+                    </div>
+                    <div style="margin:8px 0 6px; border-top:1px dashed #d1d5db; padding-top:6px; color:#6b7280; font-size:12px;">
+                        {{ texts.dip_inbound_split }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.dip_chem_inbound }}</label>
+                        <input type="number" name="dip_chem_inbound" step="0.01" min="0" value="0" placeholder="{{ texts.placeholder_bag }}"> {{ texts.unit_bag }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.dip_additive_inbound }}</label>
+                        <input type="number" name="dip_additive_inbound" step="0.01" min="0" value="0" placeholder="{{ texts.unit_kg }}"> {{ texts.unit_kg }}
+                    </div>
+                    <button type="submit">{{ texts.submit_dip }}</button>
+                </form>
+            </div>
+
+            <!-- 拣选环节 -->
+            <div class="section">
+                <h2>{{ texts.sort_section }}</h2>
+                <p>{{ texts.current_dip_stock }} {{ dip_stock }} {{ texts.unit_tray }}
+                {% if current_user.has_permission('admin') %}
+                    <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('dip', '{{ dip_stock }}')">{{ texts.edit_btn }}</button>
+                {% endif %}
+                </p>
+                <form method="POST" action="/submit_sort?lang={{ lang }}" onsubmit="return beforeSubmitSortForm()">
+                    <div class="form-group">
+                        <label>{{ texts.sort_daily }}</label>
+                        <input type="number" id="sort_trays_input" name="sort_trays" placeholder="{{ texts.placeholder_tray }}" required> {{ texts.unit_tray }}
+                        <div id="sort-missing-bubble" class="field-reminder-bubble">{{ texts.sort_missing_bubble }}</div>
+                    </div>
+                    <input type="hidden" id="sorted_kiln_trays" name="sorted_kiln_trays">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" onclick="openSortTrayModal()">{{ texts.open_sort_tray_modal }}</button>
+                        <button type="submit">{{ texts.submit_sort }}</button>
+                        <span id="sort-staged-indicator" style="display:none; align-self:center; font-size:12px; color:#666;">{{ texts.sort_staged_count }} 0 {{ texts.unit_kiln_tray }}</span>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 窑环节 -->
+        <div class="section">
+            <h2>{{ texts.kiln_section }}</h2>
+            <p>{{ texts.pending_kiln_stock }} {{ sorting_stock }} {{ texts.unit_kiln_tray }}
+                <button type="button" class="edit-mini-btn" onclick="openPendingTrayModal()">{{ texts.view_pending_trays }}</button>
+            {% if current_user.has_permission('admin') %}
+                <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('sort', '{{ sorting_stock }}')">{{ texts.edit_btn }}</button>
+            {% endif %}
+            </p>
+            <div class="kiln-grid">
+                {% for kiln_id in ['A', 'B', 'C', 'D'] %}
+                <div class="kiln">
+                    <h3>{{ kiln_id }}</h3>
+                    <p>{{ texts.status }}: <span class="status {{ kiln_status[kiln_id].status }}">{{ kiln_status[kiln_id].status_display }}</span>
+                    {% if current_user.has_permission('admin') %}
+                        <button type="button" class="edit-mini-btn" onclick="openKilnAdjustModal('{{ kiln_id }}','{{ kiln_status[kiln_id].status }}','{{ kiln_status[kiln_id].elapsed_hours or 0 }}','{{ kiln_status[kiln_id].remaining_hours or 0 }}','{{ kiln_status[kiln_id].total_trays or 0 }}','{{ kiln_status[kiln_id].remaining_trays or 0 }}')">{{ texts.edit_btn }}</button>
+                    {% endif %}
+                    </p>
+                    {% if kiln_status[kiln_id].progress %}
+                    <p>{{ kiln_status[kiln_id].progress }}</p>
+                    {% endif %}
+
+                    <!-- 操作按钮 -->
+                    <div class="form-group" style="display: flex; gap: 8px; margin-bottom: 15px;">
+                        <button type="button" onclick="startDrying('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #dc3545; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_dry }}</button>
+                        <button type="button" onclick="startUnloading('{{ kiln_id }}', {{ kiln_status[kiln_id].elapsed_hours or 0 }}, '{{ kiln_status[kiln_id].status }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #ffc107; color: black; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_unload }}</button>
+                        <button type="button" onclick="completeKiln('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #28a745; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.complete }}</button>
+                        <button type="button" onclick="openKilnTrayModal('{{ kiln_id }}')" style="background: #6f42c1; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 84px; font-size: 15px; line-height: 1.2;">{{ texts.view_kiln_trays }}</button>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 15px; display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" onclick="openTrayPickerModal('load', '{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #007bff; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_load }}</button>
+                        <button type="button" onclick="openTrayPickerModal('unload', '{{ kiln_id }}')" style="background: #17a2b8; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_unload }}</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- 二选环节 -->
+        <div class="section">
+            <h2>{{ texts.secondary_section }}</h2>
+            <p>{{ texts.kiln_done_stock_label }} {{ kiln_done_stock }} {{ texts.unit_kiln_tray }}
+            {% if current_user.has_permission('admin') %}
+                <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('kiln_done', '{{ kiln_done_stock }}')">{{ texts.edit_btn }}</button>
+            {% endif %}
+            </p>
+            <form method="POST" action="/submit_secondary_sort?lang={{ lang }}" onsubmit="return beforeSubmitSecondarySortForm()">
+                <div class="form-group">
+                    <label>{{ texts.secondary_trays }}</label>
+                    <input type="text" id="secondary_sort_trays" name="secondary_sort_trays" placeholder="{{ texts.placeholder_secondary_ids }}" required>
+                    <div id="secondary-missing-bubble" class="field-reminder-bubble">{{ texts.secondary_sort_missing_bubble }}</div>
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.secondary_waste_segment_output }}</label>
+                    <input type="number" name="waste_segment_bags" min="0" placeholder="{{ texts.placeholder_bag }}" value="0" required> {{ texts.unit_bag }}
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="openSecondaryProductModal()">{{ texts.add_product_btn }}</button>
+                    <button type="submit">{{ texts.submit_secondary }}</button>
+                </div>
+            </form>
+            <form id="secondary-products-form" method="POST" action="/submit_secondary_products?lang={{ lang }}" style="display:none;">
+                <input type="hidden" id="finished_product_trays" name="finished_product_trays">
+                <input type="hidden" id="confirm_missing_secondary_sort" name="confirm_missing_secondary_sort" value="0">
+            </form>
+        </div>
+
+        <div class="pair-grid">
+            <div class="section">
+                <h2>{{ texts.finished_zone }}</h2>
+                <p>{{ texts.finished_total_count }} {{ product_count }} {{ texts.unit_piece }}</p>
+                <div class="summary-grid">
+                    <div class="summary-card pending">
+                        <strong>{{ texts.shipping_pending }}</strong>
+                        <span>{{ shipping_summary['去仰光途中'] or 0 }}</span>
+                    </div>
+                    <div class="summary-card transit">
+                        <strong>{{ texts.shipping_in_transit }}</strong>
+                        <span>{{ shipping_summary['仰光仓已到'] or 0 }}</span>
+                    </div>
+                    <div class="summary-card signed">
+                        <strong>{{ texts.shipping_signed }}</strong>
+                        <span>{{ shipping_summary['已从仰光出港'] or 0 }}</span>
+                    </div>
+                    <div class="summary-card exception">
+                        <strong>{{ texts.shipping_exception }}</strong>
+                        <span>{{ shipping_summary['异常'] or 0 }}</span>
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button type="button" onclick="openFinishedInventoryModal()">{{ texts.view_finished_inventory }}</button>
+                    <button type="button" onclick="openCreateShipmentModal()" style="background:#0d6efd;">{{ texts.create_shipment }}</button>
+                    <button type="button" onclick="openShippingBoardModal()" style="background:#6c757d;">{{ texts.view_logistics_board }}</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>{{ texts.byproduct_section }}</h2>
+                <p>
+                    {{ texts.current_bark_stock }} {{ "%.2f"|format(bark_stock_m3) }} {{ texts.unit_m3 }}
+                    {% if current_user.has_permission('admin') %}
+                    <button
+                        type="button"
+                        class="edit-mini-btn"
+                        onclick="openByproductAdjustModal('{{ '%.0f'|format(bark_stock_ks) }}', '{{ dust_bag_stock }}', '{{ waste_segment_bag_stock }}')"
+                    >{{ texts.edit_btn }}</button>
+                    {% endif %}
+                </p>
+                <p>{{ texts.current_dust_stock }} {{ dust_bag_stock }} {{ texts.unit_bag }}
+                {% if current_user.has_permission('admin') %}
+                    <button
+                        type="button"
+                        class="edit-mini-btn"
+                        onclick="openByproductAdjustModal('{{ '%.0f'|format(bark_stock_ks) }}', '{{ dust_bag_stock }}', '{{ waste_segment_bag_stock }}')"
+                    >{{ texts.edit_btn }}</button>
+                {% endif %}
+                </p>
+                <p>
+                    {{ texts.current_waste_segment_stock }} {{ waste_segment_bag_stock }} {{ texts.unit_bag }}
+                    {% if current_user.has_permission('admin') %}
+                    <button
+                        type="button"
+                        class="edit-mini-btn"
+                        onclick="openByproductAdjustModal('{{ '%.0f'|format(bark_stock_ks) }}', '{{ dust_bag_stock }}', '{{ waste_segment_bag_stock }}')"
+                    >{{ texts.edit_btn }}</button>
+                    {% endif %}
+                </p>
+                <form method="POST" action="/submit_byproduct_sale?lang={{ lang }}">
+                    <div class="form-group">
+                        <label>{{ texts.sell_dust }}</label>
+                        <input type="number" name="sell_dust_bags" min="0" placeholder="{{ texts.placeholder_bag }}" required> {{ texts.unit_bag }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.sell_bark }}</label>
+                        <input type="number" name="sell_bark_ks" min="0" placeholder="{{ texts.placeholder_ks }}" required> {{ texts.unit_ks }}
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.sell_waste_segment }}</label>
+                        <input type="number" name="sell_waste_segment_bags" min="0" placeholder="{{ texts.placeholder_bag }}" required> {{ texts.unit_bag }}
+                    </div>
+                    <button type="submit">{{ texts.submit_sale }}</button>
+                </form>
+                {% if current_user.has_permission('admin') %}
+                <form method="POST" action="/admin/adjust_bark_sale?lang={{ lang }}" style="margin-top:10px; padding-top:10px; border-top:1px dashed #ddd;">
+                    <div class="form-group">
+                        <label>{{ texts.admin_adjust_bark_sale }}</label>
+                        <input type="number" name="bark_sale_delta_ks" step="1" placeholder="{{ texts.admin_adjust_bark_sale_placeholder }}" required> {{ texts.unit_ks }}
+                    </div>
+                    <button type="submit" style="background:#6f42c1;">{{ texts.admin_adjust_bark_sale_btn }}</button>
+                    <p style="margin:8px 0 0; color:#6b7280; font-size:12px;">{{ texts.admin_adjust_bark_sale_hint }}</p>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if result %}
+        <div id="result-toast" class="toast-msg{% if error %} error{% endif %}">
+            <strong>{{ texts.result_label }}</strong><br>
+            <span>{{ result }}</span>
+        </div>
+        {% endif %}
+
+        <div id="kiln-tray-modal" class="modal-mask">
+            <div class="modal-box">
+                <h3 id="kiln-modal-title">{{ texts.kiln_tray_detail_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.tray_id_col }}</th>
+                            <th>{{ texts.spec_col }}</th>
+                            <th>{{ texts.count_col }}</th>
+                            <th>{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="kiln-tray-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px;">
+                    {% if current_user.has_permission('admin') %}
+                    <button type="button" onclick="addKilnTrayRow()">{{ texts.add_row_btn }}</button>
+                    <button type="button" onclick="saveKilnTrays()">{{ texts.save_changes_btn }}</button>
+                    {% endif %}
+                    <button type="button" onclick="closeKilnTrayModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="stock-adjust-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(520px, 92vw);">
+                <h3>{{ texts.admin_adjust_title }}</h3>
+                <form method="POST" action="/admin/adjust_stock?lang={{ lang }}">
+                    <input type="hidden" id="adjust_section" name="section">
+                    <div class="form-group" id="adjust_value_row">
+                        <label>{{ texts.admin_adjust_stock }}</label>
+                        <input type="number" id="adjust_value" name="value" step="0.0001" min="0">
+                    </div>
+                    <div id="adjust_byproduct_rows" style="display:none;">
+                        <div class="form-group">
+                            <label>{{ texts.current_bark_stock }}</label>
+                            <input type="number" id="adjust_bark_stock_ks" name="bark_stock_ks" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>{{ texts.current_dust_stock }}</label>
+                            <input type="number" id="adjust_dust_bag_stock" name="dust_bag_stock" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>{{ texts.current_waste_segment_stock }}</label>
+                            <input type="number" id="adjust_waste_segment_bag_stock" name="waste_segment_bag_stock" min="0">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button type="submit">{{ texts.admin_adjust_btn }}</button>
+                        <button type="button" onclick="closeStockAdjustModal()">{{ texts.close_btn }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div id="kiln-adjust-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(560px, 92vw);">
+                <h3>{{ texts.admin_kiln_status_edit }}</h3>
+                <form id="kiln-adjust-form" method="POST" action="/admin/adjust_kiln?lang={{ lang }}" onsubmit="return submitKilnAdjust(event)">
+                    <input type="hidden" id="kiln_adjust_id" name="kiln_id">
+                    <div class="form-group">
+                        <label>{{ texts.admin_kiln_status_edit }}</label>
+                        <select id="kiln_adjust_status" name="status" style="padding:8px; border:1px solid #ddd; border-radius:4px;">
+                            <option value="empty">{{ texts.empty }}</option>
+                            <option value="loading">{{ texts.loading }}</option>
+                            <option value="drying">{{ texts.drying }}</option>
+                            <option value="unloading">{{ texts.unloading }}</option>
+                            <option value="ready">{{ texts.ready }}</option>
+                            <option value="completed">{{ texts.completed }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.admin_elapsed_hours }}</label>
+                        <input type="number" id="kiln_adjust_elapsed" name="elapsed_hours" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.admin_remaining_hours }}</label>
+                        <input type="number" id="kiln_adjust_remaining" name="remaining_hours" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.admin_total_trays }}</label>
+                        <input type="number" id="kiln_adjust_total" name="total_trays" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ texts.admin_remaining_trays }}</label>
+                        <input type="number" id="kiln_adjust_left" name="remaining_trays" min="0">
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button type="submit">{{ texts.admin_adjust_kiln_btn }}</button>
+                        <button type="button" onclick="closeKilnAdjustModal()">{{ texts.close_btn }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div id="secondary-product-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(960px, 98vw);">
+                <h3>{{ texts.secondary_product_modal_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.product_id_label }}</th>
+                            <th>{{ texts.quantity_label }}</th>
+                            <th>{{ texts.grade_label }}</th>
+                            <th>{{ texts.spec_col }}</th>
+                            <th>m³</th>
+                            <th style="width:140px;">{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="secondary-product-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="addSecondaryProductRow()">{{ texts.add_row_btn }}</button>
+                    <button type="button" onclick="saveSecondaryAllRows()">{{ texts.save_all_rows_btn }}</button>
+                    <button type="button" onclick="closeSecondaryProductModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="finished-inventory-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1180px, 99vw);">
+                <h3>{{ texts.finished_inventory_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.product_id_label }}</th>
+                            <th>D</th>
+                            <th>W</th>
+                            <th>L</th>
+                            <th>{{ texts.quantity_label }}</th>
+                            <th>m³</th>
+                            <th>{{ texts.weight_label }}</th>
+                            <th>{{ texts.grade_label }}</th>
+                            <th>{{ texts.status_label }}</th>
+                            <th>{{ texts.spec_col }}</th>
+                            {% if current_user.has_permission('admin') %}
+                            <th style="width:84px;">{{ texts.actions }}</th>
+                            {% endif %}
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <th>
+                                <select id="fi-filter-d" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th>
+                                <select id="fi-filter-w" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th>
+                                <select id="fi-filter-l" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th>
+                                <select id="fi-filter-pcs" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th>
+                                <select id="fi-filter-m3" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th></th>
+                            <th>
+                                <select id="fi-filter-grade" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px;" onchange="applyFinishedInventoryFilters()"></select>
+                            </th>
+                            <th></th>
+                            <th></th>
+                            {% if current_user.has_permission('admin') %}
+                            <th></th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody id="finished-inventory-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    {% if current_user.has_permission('export') %}
+                    <button type="button" id="finished-inventory-export" onclick="downloadFinishedInventory()" style="background:#007bff; color:white; text-decoration:none; padding:8px 12px; border-radius:4px;">{{ texts.export_current_query }}</button>
+                    <button type="button" id="finished-label-export" onclick="downloadFinishedLabels()" style="background:#198754; color:white; text-decoration:none; padding:8px 12px; border-radius:4px;">{{ texts.export_label_sheet }}</button>
+                    {% endif %}
+                    <button type="button" onclick="closeFinishedInventoryModal()" style="background:#6c757d;">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="create-shipment-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1100px, 98vw);">
+                <h3>{{ texts.shipment_create_title }}</h3>
+                <div class="form-group">
+                    <label>{{ texts.customer_label }}</label>
+                    <input type="text" id="shipment-customer" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.destination_label }}</label>
+                    <input type="text" id="shipment-destination" style="width:240px;" value="仰光仓">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.departure_at_label }}</label>
+                    <input type="datetime-local" id="shipment-departure-at" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.vehicle_no_label }}</label>
+                    <input type="text" id="shipment-vehicle-no" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.driver_label }}</label>
+                    <input type="text" id="shipment-driver-name" style="width:240px;">
+                </div>
+                 <div class="form-group">
+                    <label>{{ texts.eta_hours_label }}</label>
+                    <input type="number" id="shipment-eta-hours" style="width:240px;" value="36" min="1">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.remark_label }}</label>
+                    <input type="text" id="shipment-remark" style="width:min(560px, 100%);">
+                </div>
+                <p><strong>{{ texts.shipment_selected_count }}</strong><span id="shipment-selected-count">0</span></p>
+                <p><strong>{{ texts.select_products }}</strong></p>
+                <div id="shipment-product-picker" class="shipment-pick-grid"></div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                    {% if current_user.has_permission('export') %}
+                    <button type="button" onclick="exportSelectedShipmentDetails()" style="background:#198754;">{{ texts.export_selected_shipment_details }}</button>
+                    {% endif %}
+                    <button type="button" onclick="createShipment()" style="background:#0d6efd;">{{ texts.create_shipment }}</button>
+                    <button type="button" onclick="closeCreateShipmentModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="shipping-board-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1240px, 99vw);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">{{ texts.shipment_status_title }}</h3>
+                    <button type="button" onclick="loadShippingBoard()" style="background:#6c757d;">{{ texts.refresh_btn }}</button>
+                </div>
+                <table class="tray-grid" style="margin-top:14px;">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.shipment_no }}</th>
+                            <th>{{ texts.customer_label }}</th>
+                            <th>{{ texts.destination_label }}</th>
+                            <th>{{ texts.departure_at_label }}</th>
+                            <th>{{ texts.vehicle_no_label }}</th>
+                            <th>{{ texts.driver_label }}</th>
+                            <th>{{ texts.eta_hours_label }}</th>
+                            <th>{{ texts.quantity_label }}</th>
+                            <th>m³</th>
+                            <th>{{ texts.route_stage_label }}</th>
+                            <th>{{ texts.created_at }}</th>
+                            <th>{{ texts.status_actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="shipping-board-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="closeShippingBoardModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="daily-report-modal" class="modal-mask">
+            <div class="modal-box">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">{{ texts.daily_report_title }}</h3>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <label>{{ texts.report_date_label }}</label>
+                        <input type="date" id="daily-report-date" style="padding:6px; border:1px solid #ddd; border-radius:4px;">
+                        <button type="button" onclick="loadDailyReportData()">{{ texts.query_btn }}</button>
+                        {% if current_user.has_permission('export') %}
+                        <button type="button" onclick="exportDailyReportFromModal()" style="background:#0d6efd;">{{ texts.export_daily_report }}</button>
+                        {% endif %}
+                        <button type="button" onclick="closeDailyReportModal()" style="background:#6c757d;">{{ texts.close_btn }}</button>
+                    </div>
+                </div>
+                <p id="daily-report-range" style="margin:8px 0 4px; color:#6b7280; font-size:12px;"></p>
+                <p id="daily-report-note" style="margin:0 0 8px; color:#6b7280; font-size:12px;"></p>
+                <div class="report-mini-grid">
+                    <div class="report-mini-card">
+                        <h4>{{ texts.report_summary }}</h4>
+                        <table class="report-mini-table"><tbody id="daily-report-summary-body"></tbody></table>
+                    </div>
+                    <div class="report-mini-card">
+                        <h4>{{ texts.report_inventory_snapshot }}</h4>
+                        <table class="report-mini-table"><tbody id="daily-report-inv-body"></tbody></table>
+                    </div>
+                    <div class="report-mini-card">
+                        <h4>{{ texts.report_kiln_status }}</h4>
+                        <table class="report-mini-table"><tbody id="daily-report-kiln-body"></tbody></table>
+                    </div>
+                    <div class="report-mini-card">
+                        <h4>{{ texts.report_breakdown_count }}</h4>
+                        <table class="report-mini-table"><tbody id="daily-report-count-body"></tbody></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="log-entry-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(980px, 97vw);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">{{ texts.log_entry_modal_title }}</h3>
+                </div>
+                <div style="display:grid; grid-template-columns: 0.74fr 1.46fr; gap:10px; margin-top:10px;">
+                    <div>
+                        <div class="form-group">
+                            <label>{{ texts.driver_name }}</label>
+                            <input type="text" id="log-modal-driver" placeholder="{{ texts.placeholder_driver }}" style="width:220px;">
+                        </div>
+                        <div class="form-group">
+                            <label>{{ texts.truck_number }}</label>
+                            <input type="text" id="log-modal-truck" placeholder="{{ texts.placeholder_truck }}" style="width:220px;">
+                        </div>
+                        <table class="tray-grid" style="margin-top:6px;">
+                            <thead>
+                                <tr>
+                                    <th style="width:60px; text-align:center; white-space:nowrap;">阶段</th>
+                                    <th style="width:90px; white-space:nowrap;">区间</th>
+                                    <th style="width:102px; white-space:nowrap;">价格(Ks/MT)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="log-price-rules-body"></tbody>
+                        </table>
+                        <table class="tray-grid" style="margin-top:8px;">
+                            <thead>
+                                <tr>
+                                    <th>区间</th>
+                                    <th>MT</th>
+                                    <th>金额(Ks)</th>
+                                    <th>数量</th>
+                                </tr>
+                            </thead>
+                            <tbody id="log-entry-summary-body"></tbody>
+                        </table>
+                        <p style="margin:4px 0; font-size:12px; color:#6b7280;">{{ texts.log_size_hint }}</p>
+                    </div>
+                    <div>
+                        <table class="tray-grid">
+                            <thead>
+                                <tr>
+                                    <th>{{ texts.saw_log_size_label }}</th>
+                                    <th>{{ texts.saw_log_qty_label }}</th>
+                                    <th>{{ texts.saw_log_length_label }}</th>
+                                    <th>{{ texts.saw_log_total_label }}</th>
+                                    <th>{{ texts.actions }}</th>
+                                </tr>
+                            </thead>
+                            <tbody id="log-entry-detail-body"></tbody>
+                        </table>
+                        <div style="margin-top:6px; font-size:13px;">
+                            {{ texts.log_input_total }} <strong id="log-entry-total-value">0.0000</strong> {{ texts.unit_mt }}
+                        </div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                            <button type="button" onclick="addLogEntryDetailRow()">{{ texts.saw_log_add_row_btn }}</button>
+                            <button type="button" onclick="saveLogEntryModal()">{{ texts.log_done_fill_btn }}</button>
+                            <button type="button" onclick="closeLogEntryModal()" style="background:#6c757d;">{{ texts.close_btn }}</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="log-entry-list-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(920px, 96vw);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">{{ texts.log_history_title }}</h3>
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" onclick="loadLogEntryList()">{{ texts.refresh_btn }}</button>
+                        <button type="button" onclick="closeLogEntryListModal()" style="background:#6c757d;">{{ texts.close_btn }}</button>
+                    </div>
+                </div>
+                <table class="tray-grid" style="margin-top:10px;">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.created_at }}</th>
+                            <th>{{ texts.driver_name }}</th>
+                            <th>{{ texts.truck_number }}</th>
+                            <th>MT</th>
+                            <th>{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-entry-list-body"></tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="4" style="text-align:right;">合计</th>
+                            <th id="log-entry-list-total">0.0000</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+        <div id="saw-machine-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1180px, 98vw);">
+                <h3>{{ texts.saw_machine_modal_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th style="width:90px;">{{ texts.saw_machine_no }}</th>
+                            <th>{{ texts.saw_daily }}</th>
+                            <th>{{ texts.saw_products }}</th>
+                            <th>{{ texts.saw_bark }}</th>
+                            <th>{{ texts.saw_dust }}</th>
+                            <th style="width:90px;">{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="saw-machine-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="finishSawMachineModal(false)">{{ texts.saw_machine_fill_btn }}</button>
+                    <button type="button" onclick="closeSawMachineModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="saw-log-detail-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(760px, 95vw);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <h3 style="margin:0;">{{ texts.saw_log_detail_title }}</h3>
+                    <div id="saw-log-machine-label" style="font-size:13px; color:#6b7280;"></div>
+                </div>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.saw_log_size_label }}</th>
+                            <th>{{ texts.saw_log_qty_label }}</th>
+                            <th>{{ texts.saw_log_length_label }}</th>
+                            <th>{{ texts.saw_daily }}</th>
+                            <th style="width:84px;">{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="saw-log-detail-body"></tbody>
+                </table>
+                <div style="margin:8px 0; font-size:13px; color:#374151;">
+                    {{ texts.saw_log_total_label }}: <strong id="saw-log-total-value">0.0000</strong> {{ texts.unit_mt }}
+                </div>
+                <div style="margin:8px 0 4px; font-size:13px; color:#374151;">未完成（从上表扣减）</div>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.saw_log_size_label }}</th>
+                            <th>{{ texts.saw_log_qty_label }}</th>
+                            <th>{{ texts.saw_log_length_label }}</th>
+                            <th>{{ texts.saw_daily }}</th>
+                            <th style="width:84px;">{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="saw-log-pending-body"></tbody>
+                </table>
+                <div style="margin:8px 0; font-size:13px; color:#6b7280;">
+                    未完成合计: <strong id="saw-log-pending-total-value">0.0000</strong> {{ texts.unit_mt }}
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="addSawLogDetailRow()">{{ texts.saw_log_add_row_btn }}</button>
+                    <button type="button" onclick="addPendingSawLogDetailRow()">加未完成</button>
+                    <button type="button" onclick="saveSawLogDetailModal()">{{ texts.saw_log_done_btn }}</button>
+                    <button type="button" onclick="closeSawLogDetailModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="sort-tray-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1180px, 99vw);">
+                <h3>{{ texts.sort_tray_modal_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.tray_id_label }}</th>
+                            <th>{{ texts.primary_spec_label }}</th>
+                            <th>{{ texts.fixed_qty_label }}</th>
+                            <th>{{ texts.extra_spec_label }}</th>
+                            <th>{{ texts.extra_qty_label }}</th>
+                            <th>{{ texts.sort_tray_content }}</th>
+                            <th style="width:84px;">{{ texts.actions }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sort-tray-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" onclick="addSortTrayRow()">{{ texts.add_row_btn }}</button>
+                    <button type="button" onclick="saveSortTrayRows()">{{ texts.save_changes_btn }}</button>
+                    <button type="button" onclick="closeSortTrayModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="pending-tray-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(1080px, 98vw);">
+                <h3>{{ texts.pending_tray_detail_title }}</h3>
+                <table class="tray-grid">
+                    <thead>
+                        <tr>
+                            <th style="width:160px;">{{ texts.tray_id_col }}</th>
+                            <th>{{ texts.sort_tray_content }}</th>
+                            {% if current_user.has_permission('admin') %}
+                            <th style="width:84px;">{{ texts.actions }}</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody id="pending-tray-body"></tbody>
+                </table>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    {% if current_user.has_permission('admin') %}
+                    <button type="button" onclick="addPendingTrayRow()">{{ texts.add_row_btn }}</button>
+                    <button type="button" onclick="savePendingTrayRows()">{{ texts.save_changes_btn }}</button>
+                    {% endif %}
+                    <button type="button" onclick="closePendingTrayModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="tray-picker-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(980px, 98vw);">
+                <h3 id="tray-picker-title"></h3>
+                <div id="tray-picker-grid" class="tray-picker-grid"></div>
+                <div id="tray-picker-empty" style="display:none; color:#6b7280; font-size:13px;">{{ texts.tray_picker_empty }}</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                    <button type="button" onclick="closeTrayPickerModal()">{{ texts.close_btn }}</button>
+                    <button type="button" id="tray-picker-confirm-btn" onclick="submitTrayPickerSelection()">{{ texts.load }}</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% include 'partials/main_body_script.html' %}
+</body>
+</html>

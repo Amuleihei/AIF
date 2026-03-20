@@ -1,0 +1,2618 @@
+    <script>
+        const KILN_MAX_TRAYS = Math.max(1, Number('{{ kiln_max_trays or 70 }}') || 70);
+
+        function startDrying(kilnId, remainingTrays) {
+            const loadedTrays = Number(remainingTrays) || 0;
+            let confirmFlag = '0';
+            if (loadedTrays < KILN_MAX_TRAYS) {
+                const msg = `{{ texts.kiln_not_full_confirm }}`
+                    .replace('{current}', String(loadedTrays))
+                    .replace('{max}', String(KILN_MAX_TRAYS));
+                if (!confirm(msg)) return;
+                confirmFlag = '1';
+            }
+            storeScrollPosition();
+            fetch('/kiln_action?lang={{ lang }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'kiln_id=' + kilnId + '&action=start_dry&confirm_dry=' + confirmFlag
+            })
+            .then(response => response.text())
+            .then(html => {
+                replacePageHtml(html);
+            });
+        }
+
+        function startUnloading(kilnId, elapsedHours, status, remainingTrays) {
+            if (status === 'unloading') {
+                alert(`已在出窑中 窑内剩余${remainingTrays || 0}托`);
+                return;
+            }
+            let confirmFlag = '0';
+            if (elapsedHours < 100) {
+                if (!confirm(`当前时间${elapsedHours}小时不足100小时，确定要待出窑吗？`)) {
+                    return;
+                }
+                confirmFlag = '1';
+            }
+            storeScrollPosition();
+            fetch('/kiln_action?lang={{ lang }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'kiln_id=' + kilnId + '&action=start_unload&confirm_unload=' + confirmFlag
+            })
+            .then(response => response.text())
+            .then(html => {
+                replacePageHtml(html);
+            });
+        }
+
+        function completeKiln(kilnId, remainingTrays) {
+            if ((Number(remainingTrays) || 0) > 0) {
+                alert(`该窑未完成，尚有${remainingTrays}托在窑中。`);
+                return;
+            }
+            storeScrollPosition();
+            fetch('/kiln_action?lang={{ lang }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'kiln_id=' + kilnId + '&action=complete'
+            })
+            .then(response => response.text())
+            .then(html => {
+                replacePageHtml(html);
+            });
+        }
+
+        function submitKilnAction(kilnId, action, data, extraFormData = '') {
+            storeScrollPosition();
+            fetch('/kiln_action?lang={{ lang }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'kiln_id=' + kilnId + '&action=' + action + '&trays=' + encodeURIComponent(data) + (extraFormData || '')
+            })
+            .then(response => response.text())
+            .then(html => {
+                replacePageHtml(html);
+            });
+        }
+
+        function loadKiln(kilnId, data) {
+            const sortInput = document.getElementById('sort_trays_input');
+            const sortVal = parseInt((sortInput && sortInput.value) || '0', 10) || 0;
+            let extra = '';
+            if (sortVal <= 0) {
+                highlightMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+                if (!confirm('{{ texts.sort_missing_confirm }}')) return;
+                extra = '&confirm_missing_sort=1';
+            }
+            submitKilnAction(kilnId, 'load', data, extra);
+        }
+
+        function unloadKiln(kilnId, data) {
+            submitKilnAction(kilnId, 'unload', data);
+        }
+
+        const SORTING_SPEC_PCS = {
+            '84': { spec: '950x84x22', qty: 297 },
+            '60': { spec: '950x60x22', qty: 405 },
+            '71': { spec: '950x71x22', qty: 378 },
+            '44': { spec: '950x44x22', qty: 540 }
+        };
+
+        const CURRENT_LANG = '{{ lang }}';
+        const USE_DWL_SPEC_DISPLAY = CURRENT_LANG === 'en' || CURRENT_LANG === 'my';
+        const CURRENT_DIP_STOCK = Number('{{ dip_stock }}') || 0;
+        const CURRENT_KILN_DONE_STOCK = Number('{{ kiln_done_stock }}') || 0;
+        const OVERVIEW_RADAR_LABELS = {{ (overview_radar_labels or []) | tojson }};
+        const OVERVIEW_RADAR = {{ (overview_radar or {}) | tojson }};
+        let DAILY_ENTRY_STATUS = { loaded: false, missing_sort: false, missing_secondary_sort: false };
+        const IS_ADMIN = {{ 'true' if current_user.has_permission('admin') else 'false' }};
+        const CAN_EXPORT_LOG = {{ 'true' if current_user.has_permission('export') else 'false' }};
+        let currentKilnId = null;
+        let trayPickerState = { mode: '', kilnId: '', selected: new Set(), dragActive: false, dragValue: true };
+        let finishedInventoryRows = [];
+        let shipmentInventoryRows = [];
+        let selectedShipmentProducts = new Set();
+        let shipmentPickerState = { dragActive: false, dragValue: true };
+        let shippingOrderRows = [];
+        let logEntryListRows = [];
+        let logEntrySubmitting = false;
+        const LOG_PRICE_RULE_DEFS = [
+            { key: '15_17', label: '15-17', min_size: 15, max_size: 17, is_max_open: 0, default_price: 90000 },
+            { key: '15_18', label: '15-18', min_size: 15, max_size: 18, is_max_open: 0, default_price: 90000 },
+            { key: '18_24', label: '18-24', min_size: 18, max_size: 24, is_max_open: 0, default_price: 320000 },
+            { key: '19_24', label: '19-24', min_size: 19, max_size: 24, is_max_open: 0, default_price: 320000 },
+            { key: '25_plus_430', label: '25+', min_size: 25, max_size: 0, is_max_open: 1, default_price: 430000 },
+            { key: '25_plus_450', label: '25+', min_size: 25, max_size: 0, is_max_open: 1, default_price: 450000 }
+        ];
+        const LOG_STAGE_ROWS = [
+            { id: 'stage1', label: 'A', options: ['15_17', '15_18'], defaultKey: '15_17' },
+            { id: 'stage2', label: 'B', options: ['18_24', '19_24'], defaultKey: '18_24' },
+            { id: 'stage3', label: 'C', options: ['25_plus_430'], defaultKey: '25_plus_430' }
+        ];
+        let logEntryDraft = { driver_name: '', truck_number: '', details: [], rules: [] };
+        let logDriverFetchTimer = null;
+        let sawMachineDraft = [];
+        let currentSawLogMachineNo = null;
+
+        function calcLogEntryMt(size, length, quantity) {
+            const sizeVal = Number(size) || 0;
+            const lengthVal = Number(length) || 0;
+            const qtyVal = Number(quantity) || 0;
+            if (sizeVal <= 0 || qtyVal <= 0 || lengthVal <= 0) return 0;
+            return (sizeVal * sizeVal * lengthVal * qtyVal) / 115200;
+        }
+
+        function parseLogDetailsPayloadSafe(rawValue) {
+            if (!rawValue) return [];
+            try {
+                const parsed = JSON.parse(rawValue);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        function defaultLogRules() {
+            return LOG_PRICE_RULE_DEFS.map(item => ({
+                key: item.key,
+                label: item.label,
+                min_size: item.min_size,
+                max_size: item.max_size,
+                is_max_open: item.is_max_open,
+                enabled: 0,
+                price_per_mt: item.default_price
+            }));
+        }
+
+        function ruleDefByKey(key) {
+            return LOG_PRICE_RULE_DEFS.find(item => item.key === key) || null;
+        }
+
+        function parseLogRulesPayloadSafe(rawValue) {
+            if (!rawValue) return defaultLogRules();
+            try {
+                const parsed = JSON.parse(rawValue);
+                if (!Array.isArray(parsed)) return defaultLogRules();
+                const map = {};
+                parsed.forEach(item => { if (item && item.key) map[String(item.key)] = item; });
+                return LOG_PRICE_RULE_DEFS.map(def => {
+                    const from = map[def.key] || {};
+                    return {
+                        key: def.key,
+                        label: def.label,
+                        min_size: def.min_size,
+                        max_size: def.max_size,
+                        is_max_open: def.is_max_open,
+                        enabled: Number(from.enabled || 0) === 1 ? 1 : 0,
+                        price_per_mt: Number(from.price_per_mt || def.default_price) || 0
+                    };
+                });
+            } catch (_) {
+                return defaultLogRules();
+            }
+        }
+
+        function rulesToStageConfig(rules) {
+            const src = Array.isArray(rules) && rules.length ? rules : defaultLogRules();
+            const map = {};
+            src.forEach(item => { if (item && item.key) map[String(item.key)] = item; });
+            const stage1Opt = LOG_STAGE_ROWS[0].options.find(key => Number((map[key] || {}).enabled || 0) === 1) || LOG_STAGE_ROWS[0].defaultKey;
+            const stage2Opt = LOG_STAGE_ROWS[1].options.find(key => Number((map[key] || {}).enabled || 0) === 1) || LOG_STAGE_ROWS[1].defaultKey;
+            const stage3Opts = ['25_plus_430', '25_plus_450'];
+            const stage3Opt = stage3Opts.find(key => Number((map[key] || {}).enabled || 0) === 1) || '25_plus_430';
+            const stage3PriceSource = map[stage3Opt] || map['25_plus_430'] || map['25_plus_450'] || {};
+            return {
+                stage1_key: stage1Opt,
+                stage1_price: Number((map[stage1Opt] || {}).price_per_mt || (ruleDefByKey(stage1Opt) || {}).default_price || 0),
+                stage2_key: stage2Opt,
+                stage2_price: Number((map[stage2Opt] || {}).price_per_mt || (ruleDefByKey(stage2Opt) || {}).default_price || 0),
+                stage3_price: Number(stage3PriceSource.price_per_mt || 430000)
+            };
+        }
+
+        function stageConfigToRules(cfg) {
+            const base = defaultLogRules();
+            const map = {};
+            base.forEach(item => { map[item.key] = item; });
+            const stage1Key = String(cfg.stage1_key || '15_17');
+            const stage2Key = String(cfg.stage2_key || '18_24');
+            const stage3Key = '25_plus_430';
+            if (map[stage1Key]) {
+                map[stage1Key].enabled = 1;
+                map[stage1Key].price_per_mt = Number(cfg.stage1_price || (ruleDefByKey(stage1Key) || {}).default_price || 0);
+            }
+            if (map[stage2Key]) {
+                map[stage2Key].enabled = 1;
+                map[stage2Key].price_per_mt = Number(cfg.stage2_price || (ruleDefByKey(stage2Key) || {}).default_price || 0);
+            }
+            if (map[stage3Key]) {
+                map[stage3Key].enabled = 1;
+                map[stage3Key].price_per_mt = Number(cfg.stage3_price || (ruleDefByKey(stage3Key) || {}).default_price || 0);
+            }
+            if (map['25_plus_450']) {
+                map['25_plus_450'].enabled = 0;
+                map['25_plus_450'].price_per_mt = Number(cfg.stage3_price || (ruleDefByKey('25_plus_450') || {}).default_price || 0);
+            }
+            return LOG_PRICE_RULE_DEFS.map(def => map[def.key]);
+        }
+
+        function renderLogPriceRules(rules) {
+            const body = document.getElementById('log-price-rules-body');
+            if (!body) return;
+            body.innerHTML = '';
+            const cfg = rulesToStageConfig(rules);
+            LOG_STAGE_ROWS.forEach((row, idx) => {
+                const tr = document.createElement('tr');
+                if (row.id === 'stage1' || row.id === 'stage2') {
+                    const selectedKey = cfg[`${row.id}_key`] || row.defaultKey;
+                    const selectedPrice = Number(cfg[`${row.id}_price`] || 0);
+                    const options = row.options.map((key) => {
+                        const def = ruleDefByKey(key);
+                        return `<option value="${key}"${selectedKey === key ? ' selected' : ''}>${def ? def.label : key}</option>`;
+                    }).join('');
+                    tr.innerHTML = `
+                        <td style="text-align:center; font-weight:700;">${row.label}</td>
+                        <td><select class="lpr-stage-key" data-stage="${row.id}" style="width:120px;">${options}</select></td>
+                        <td><input type="number" class="lpr-stage-price" data-stage="${row.id}" min="0" step="0.0001" value="${selectedPrice}" style="width:122px;"></td>
+                    `;
+                } else {
+                    const selectedPrice = Number(cfg.stage3_price || 0);
+                    tr.innerHTML = `
+                        <td style="text-align:center; font-weight:700;">${row.label}</td>
+                        <td style="white-space:nowrap;">25+</td>
+                        <td><input type="number" class="lpr-stage-price" data-stage="${row.id}" min="0" step="0.0001" value="${selectedPrice}" style="width:122px;"></td>
+                    `;
+                }
+                body.appendChild(tr);
+            });
+            body.querySelectorAll('.lpr-stage-key,.lpr-stage-price').forEach(el => {
+                el.addEventListener('input', renderLogEntryDetailTotal);
+                el.addEventListener('change', renderLogEntryDetailTotal);
+            });
+        }
+
+        function readRulesFromUi() {
+            const cfg = {
+                stage1_key: '15_17',
+                stage1_price: 90000,
+                stage2_key: '18_24',
+                stage2_price: 320000,
+                stage3_price: 430000
+            };
+            const stage1KeyEl = document.querySelector('#log-price-rules-body .lpr-stage-key[data-stage="stage1"]');
+            const stage2KeyEl = document.querySelector('#log-price-rules-body .lpr-stage-key[data-stage="stage2"]');
+            const stage1PriceEl = document.querySelector('#log-price-rules-body .lpr-stage-price[data-stage="stage1"]');
+            const stage2PriceEl = document.querySelector('#log-price-rules-body .lpr-stage-price[data-stage="stage2"]');
+            const stage3PriceEl = document.querySelector('#log-price-rules-body .lpr-stage-price[data-stage="stage3"]');
+            cfg.stage1_key = stage1KeyEl ? String(stage1KeyEl.value || '15_17') : '15_17';
+            cfg.stage2_key = stage2KeyEl ? String(stage2KeyEl.value || '18_24') : '18_24';
+            cfg.stage1_price = stage1PriceEl ? (Number(stage1PriceEl.value || 0) || 0) : 90000;
+            cfg.stage2_price = stage2PriceEl ? (Number(stage2PriceEl.value || 0) || 0) : 320000;
+            cfg.stage3_price = stage3PriceEl ? (Number(stage3PriceEl.value || 0) || 0) : 430000;
+            return stageConfigToRules(cfg);
+        }
+
+        function inLogRuleRange(sizeVal, rule) {
+            if (!rule) return false;
+            if (Number(rule.is_max_open || 0) === 1) return sizeVal >= Number(rule.min_size || 0);
+            return sizeVal >= Number(rule.min_size || 0) && sizeVal <= Number(rule.max_size || 0);
+        }
+
+        function buildLogEntrySummary(details, rules) {
+            const enabledRules = (rules || []).filter(r => Number(r.enabled || 0) === 1 && Number(r.price_per_mt || 0) > 0);
+            const summaryMap = {};
+            let unmatchedMt = 0;
+            let unmatchedQty = 0;
+            (details || []).forEach(item => {
+                const sizeVal = Number(item.size_mm || 0);
+                const mt = Number(item.consumed_mt || 0);
+                const qty = Number(item.quantity || 0);
+                if (mt <= 0) return;
+                let matched = null;
+                for (const rule of enabledRules) {
+                    if (inLogRuleRange(sizeVal, rule)) {
+                        matched = rule;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    unmatchedMt += mt;
+                    unmatchedQty += qty;
+                    return;
+                }
+                const key = String(matched.key || '');
+                if (!summaryMap[key]) {
+                    summaryMap[key] = { key, label: matched.label, price_per_mt: Number(matched.price_per_mt || 0), mt: 0, amount_ks: 0, quantity: 0 };
+                }
+                summaryMap[key].mt = Number((summaryMap[key].mt + mt).toFixed(4));
+                summaryMap[key].amount_ks = Number((summaryMap[key].mt * summaryMap[key].price_per_mt).toFixed(2));
+                summaryMap[key].quantity = Number(summaryMap[key].quantity || 0) + qty;
+            });
+            const rows = LOG_PRICE_RULE_DEFS
+                .map(def => summaryMap[def.key])
+                .filter(Boolean);
+            if (unmatchedMt > 0) {
+                rows.push({ key: 'unmatched', label: '未匹配区间', price_per_mt: 0, mt: Number(unmatchedMt.toFixed(4)), amount_ks: 0, quantity: unmatchedQty });
+            }
+            return rows;
+        }
+
+        function renderLogEntrySummaryRows(rows) {
+            const body = document.getElementById('log-entry-summary-body');
+            if (!body) return;
+            body.innerHTML = '';
+            let mtTotal = 0;
+            let amountTotal = 0;
+            let qtyTotal = 0;
+            (rows || []).forEach(item => {
+                const mtVal = Number(item.mt || 0);
+                const amountVal = Number(item.amount_ks || 0);
+                const qtyVal = Number(item.quantity || 0);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${item.label || item.key || ''}</td><td>${mtVal.toFixed(4)}</td><td>${amountVal.toFixed(2)}</td><td>${qtyVal}</td>`;
+                body.appendChild(tr);
+                mtTotal += mtVal;
+                amountTotal += amountVal;
+                qtyTotal += qtyVal;
+            });
+            if (!rows || !rows.length) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td colspan="4" style="color:#6b7280;">暂无</td>`;
+                body.appendChild(tr);
+                return;
+            }
+            const totalRow = document.createElement('tr');
+            totalRow.innerHTML = `<td><strong>合计</strong></td><td><strong>${mtTotal.toFixed(4)}</strong></td><td><strong>${amountTotal.toFixed(2)}</strong></td><td><strong>${qtyTotal}</strong></td>`;
+            body.appendChild(totalRow);
+        }
+
+        function renderLogEntryDetailTotal() {
+            const rows = Array.from(document.querySelectorAll('#log-entry-detail-body tr'));
+            const details = rows.map(row => {
+                const size_mm = Number(row.querySelector('.led-size').value || 0);
+                const quantity = Number(row.querySelector('.led-qty').value || 0);
+                const length_ft = Number(row.querySelector('.led-length').value || 3);
+                const consumed_mt = calcLogEntryMt(size_mm, length_ft, quantity);
+                return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+            const total = rows.reduce((sum, row) => {
+                return sum + calcLogEntryMt(
+                    row.querySelector('.led-size').value,
+                    row.querySelector('.led-length').value,
+                    row.querySelector('.led-qty').value
+                );
+            }, 0);
+            const totalEl = document.getElementById('log-entry-total-value');
+            if (totalEl) totalEl.textContent = total.toFixed(4);
+            const totalLeftEl = document.getElementById('log-entry-total-value-left');
+            if (totalLeftEl) totalLeftEl.textContent = total.toFixed(4);
+            rows.forEach(row => {
+                const mt = calcLogEntryMt(
+                    row.querySelector('.led-size').value,
+                    row.querySelector('.led-length').value,
+                    row.querySelector('.led-qty').value
+                );
+                row.querySelector('.led-mt').value = mt > 0 ? mt.toFixed(4) : '';
+            });
+            renderLogEntrySummaryRows(buildLogEntrySummary(details, readRulesFromUi()));
+        }
+
+        function addLogEntryDetailRow(detail = {}, focusField = 'size') {
+            const body = document.getElementById('log-entry-detail-body');
+            if (!body) return;
+            const lastSizeInput = body.querySelector('tr:last-child .led-size');
+            const nextAutoSize = lastSizeInput ? (Number(lastSizeInput.value || 0) + 1) : 15;
+            const sizeVal = Number(detail.size_mm || 0) > 0 ? Number(detail.size_mm) : nextAutoSize;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>
+                    <input type="number" class="led-size" min="1" value="${sizeVal}" readonly style="height:30px; padding:4px 6px; font-size:12px; width:90px; background:#f8f9fa;">
+                </td>
+                <td><input type="number" class="led-qty" min="1" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td>
+                    <select class="led-length" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:90px; font-size:12px;">
+                        <option value="3"${Number(detail.length_ft || 3) === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
+                        <option value="4"${Number(detail.length_ft || 3) === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
+                    </select>
+                </td>
+                <td><input type="text" class="led-mt" readonly value="${detail.consumed_mt ? Number(detail.consumed_mt).toFixed(4) : ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px; background:#f8f9fa;"></td>
+                <td><button type="button" onclick="this.closest('tr').remove(); renderLogEntryDetailTotal();">{{ texts.delete }}</button></td>
+            `;
+            body.appendChild(tr);
+            const sizeInput = tr.querySelector('.led-size');
+            const qtyInput = tr.querySelector('.led-qty');
+            const lengthInput = tr.querySelector('.led-length');
+            [qtyInput, lengthInput].forEach(input => {
+                input.addEventListener('input', renderLogEntryDetailTotal);
+                input.addEventListener('change', renderLogEntryDetailTotal);
+            });
+            qtyInput.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                addLogEntryDetailRow({}, 'qty');
+            });
+            renderLogEntryDetailTotal();
+            const target = qtyInput;
+            setTimeout(() => {
+                target.focus();
+                target.select();
+            }, 0);
+        }
+
+        function syncLogEntryDraftFromModal() {
+            const rows = Array.from(document.querySelectorAll('#log-entry-detail-body tr'));
+            const details = rows.map(row => {
+                const size_mm = Number(row.querySelector('.led-size').value || 0);
+                const quantity = Number(row.querySelector('.led-qty').value || 0);
+                const length_ft = Number(row.querySelector('.led-length').value || 3);
+                const consumed_mt = calcLogEntryMt(size_mm, length_ft, quantity);
+                return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+            logEntryDraft = {
+                driver_name: (document.getElementById('log-modal-driver').value || '').trim(),
+                truck_number: (document.getElementById('log-modal-truck').value || '').trim(),
+                details,
+                rules: readRulesFromUi()
+            };
+        }
+
+        function updateLogMainFormFromDraft() {
+            const details = Array.isArray(logEntryDraft.details) ? logEntryDraft.details : [];
+            const total = details.reduce((sum, item) => sum + (Number(item.consumed_mt) || 0), 0);
+            document.getElementById('log_driver_hidden').value = logEntryDraft.driver_name || '';
+            document.getElementById('log_truck_hidden').value = logEntryDraft.truck_number || '';
+            const summaryRows = buildLogEntrySummary(details, Array.isArray(logEntryDraft.rules) ? logEntryDraft.rules : []);
+            const firstPriced = summaryRows.find(item => item.key !== 'unmatched');
+            document.getElementById('log_size_range_hidden').value = firstPriced ? String(firstPriced.label || '') : '';
+            document.getElementById('log_price_hidden').value = firstPriced ? String(Number(firstPriced.price_per_mt || 0).toFixed(4)) : '';
+            document.getElementById('log_price_rules_payload_hidden').value = JSON.stringify(Array.isArray(logEntryDraft.rules) ? logEntryDraft.rules : []);
+            document.getElementById('log_amount_hidden').value = total > 0 ? total.toFixed(4) : '';
+            document.getElementById('log_details_payload_hidden').value = JSON.stringify(details);
+
+            document.getElementById('log_driver_preview').value = logEntryDraft.driver_name || '';
+            document.getElementById('log_truck_preview').value = logEntryDraft.truck_number || '';
+            document.getElementById('log_amount_preview').value = total > 0 ? total.toFixed(4) : '';
+        }
+
+        function openLogEntryModal() {
+            const hiddenDriver = document.getElementById('log_driver_hidden').value || '';
+            const hiddenTruck = document.getElementById('log_truck_hidden').value || '';
+            const hiddenRules = parseLogRulesPayloadSafe(document.getElementById('log_price_rules_payload_hidden').value || '');
+            const hiddenDetails = parseLogDetailsPayloadSafe(document.getElementById('log_details_payload_hidden').value || '');
+
+            document.getElementById('log-modal-driver').value = hiddenDriver;
+            document.getElementById('log-modal-truck').value = hiddenTruck;
+            renderLogPriceRules(hiddenRules);
+            const body = document.getElementById('log-entry-detail-body');
+            body.innerHTML = '';
+            const rows = hiddenDetails.length ? hiddenDetails : [{}];
+            rows.forEach((detail) => addLogEntryDetailRow(detail, 'qty'));
+            document.getElementById('log-entry-modal').style.display = 'flex';
+        }
+
+        function closeLogEntryModal() {
+            document.getElementById('log-entry-modal').style.display = 'none';
+        }
+
+        function saveLogEntryModal() {
+            syncLogEntryDraftFromModal();
+            updateLogMainFormFromDraft();
+            closeLogEntryModal();
+        }
+
+        function fetchLogDriverProfile() {
+            const driverInput = document.getElementById('log-modal-driver');
+            if (!driverInput) return;
+            const driver = (driverInput.value || '').trim();
+            if (!driver) return;
+            const truck = (document.getElementById('log-modal-truck').value || '').trim();
+            fetch('/api/log_driver_profile?lang={{ lang }}&driver_name=' + encodeURIComponent(driver) + '&truck_number=' + encodeURIComponent(truck))
+            .then(r => r.json())
+            .then(data => {
+                if (!data) return;
+                if (data.found && data.truck_number) {
+                    document.getElementById('log-modal-truck').value = data.truck_number;
+                }
+                const rules = parseLogRulesPayloadSafe(JSON.stringify(Array.isArray(data.rules) ? data.rules : []));
+                renderLogPriceRules(rules);
+                renderLogEntryDetailTotal();
+            })
+            .catch(() => {});
+        }
+
+        function beforeSubmitLogEntryForm() {
+            if (logEntrySubmitting) return false;
+            const amount = Number(document.getElementById('log_amount_hidden').value || 0);
+            const driver = (document.getElementById('log_driver_hidden').value || '').trim();
+            const truck = (document.getElementById('log_truck_hidden').value || '').trim();
+            if (!driver || !truck || amount <= 0) {
+                alert('{{ texts.log_entry_modal_btn }}');
+                return false;
+            }
+            logEntrySubmitting = true;
+            const submitBtn = document.getElementById('submit-log-entry-btn');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.7';
+            }
+            return true;
+        }
+
+        function emptySawMachineRecord(machineNo) {
+            return {
+                machine_no: machineNo,
+                saw_mt: '',
+                saw_trays: '',
+                bark_m3: '',
+                dust_bags: '',
+                log_details: [],
+                pending_log_details: []
+            };
+        }
+
+        function safeParseSawMachinePayload() {
+            const hidden = document.getElementById('saw_machine_payload');
+            if (!hidden || !hidden.value) return [];
+            try {
+                const parsed = JSON.parse(hidden.value);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        function buildSawMachineDraft() {
+            const payload = safeParseSawMachinePayload();
+            const byMachine = {};
+            payload.forEach(item => {
+                if (!item || !item.machine_no) return;
+                byMachine[Number(item.machine_no)] = {
+                    machine_no: Number(item.machine_no),
+                    saw_mt: item.saw_mt ?? '',
+                    saw_trays: item.saw_trays ?? '',
+                    bark_m3: item.bark_m3 ?? '',
+                    dust_bags: item.dust_bags ?? '',
+                    log_details: Array.isArray(item.log_details) ? item.log_details : [],
+                    pending_log_details: Array.isArray(item.pending_log_details) ? item.pending_log_details : []
+                };
+            });
+            sawMachineDraft = [];
+            for (let machineNo = 1; machineNo <= 6; machineNo += 1) {
+                sawMachineDraft.push(byMachine[machineNo] || emptySawMachineRecord(machineNo));
+            }
+        }
+
+        function sawMachinePayloadRows() {
+            return sawMachineDraft
+                .map(item => ({
+                    machine_no: Number(item.machine_no) || 0,
+                    saw_mt: Number(item.saw_mt) || 0,
+                    saw_trays: Number(item.saw_trays) || 0,
+                    bark_m3: Number(item.bark_m3) || 0,
+                    dust_bags: Number(item.dust_bags) || 0,
+                    log_details: Array.isArray(item.log_details) ? item.log_details : [],
+                    pending_log_details: Array.isArray(item.pending_log_details) ? item.pending_log_details : []
+                }))
+                .filter(item => item.machine_no > 0 && (item.saw_mt > 0 || item.saw_trays > 0 || item.bark_m3 > 0 || item.dust_bags > 0 || item.log_details.length));
+        }
+
+        function formatSawNumber(value, digits = 4) {
+            const num = Number(value) || 0;
+            if (!num) return '';
+            return num.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '');
+        }
+
+        function updateSawMainFormFromDraft() {
+            const rows = sawMachinePayloadRows();
+            if (!rows.length) {
+                document.getElementById('saw_tm_input').value = '';
+                document.getElementById('saw_trays_input').value = '';
+                document.getElementById('bark_m3_input').value = '';
+                document.getElementById('dust_bags_input').value = '';
+                document.getElementById('saw_machine_payload').value = '';
+                return;
+            }
+            document.getElementById('saw_tm_input').value = formatSawNumber(rows.reduce((sum, item) => sum + (Number(item.saw_mt) || 0), 0), 4);
+            document.getElementById('saw_trays_input').value = rows.reduce((sum, item) => sum + (Number(item.saw_trays) || 0), 0);
+            const barkSum = rows.reduce((sum, item) => sum + (Number(item.bark_m3) || 0), 0);
+            document.getElementById('bark_m3_input').value = barkSum > 0 ? formatSawNumber(barkSum, 4) : '0';
+            document.getElementById('dust_bags_input').value = rows.reduce((sum, item) => sum + (Number(item.dust_bags) || 0), 0);
+            document.getElementById('saw_machine_payload').value = JSON.stringify(rows);
+        }
+
+        function renderSawMachineModal() {
+            const body = document.getElementById('saw-machine-body');
+            body.innerHTML = '';
+            sawMachineDraft.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.dataset.machineNo = item.machine_no;
+                tr.innerHTML = `
+                    <td>${item.machine_no}</td>
+                    <td><input type="number" class="sm-mt" step="0.0001" value="${item.saw_mt}" placeholder="{{ texts.placeholder_saw_mt }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
+                    <td><input type="number" class="sm-trays" min="0" value="${item.saw_trays}" placeholder="{{ texts.placeholder_tray }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                    <td><input type="number" class="sm-bark" step="0.0001" min="0" value="${item.bark_m3}" placeholder="{{ texts.placeholder_m3 }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
+                    <td><input type="number" class="sm-dust" min="0" value="${item.dust_bags}" placeholder="{{ texts.placeholder_bag }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                    <td><button type="button" onclick="openSawLogDetailModal(${item.machine_no})">{{ texts.saw_machine_add_log_btn }}</button></td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function syncSawMachineDraftFromModal() {
+            const rows = Array.from(document.querySelectorAll('#saw-machine-body tr'));
+            sawMachineDraft = rows.map((row, idx) => {
+                const machineNo = Number(row.dataset.machineNo || (idx + 1));
+                const prev = sawMachineDraft.find(item => Number(item.machine_no) === machineNo) || emptySawMachineRecord(machineNo);
+                return {
+                    machine_no: machineNo,
+                    saw_mt: (row.querySelector('.sm-mt').value || '').trim(),
+                    saw_trays: (row.querySelector('.sm-trays').value || '').trim(),
+                    bark_m3: (row.querySelector('.sm-bark').value || '').trim(),
+                    dust_bags: (row.querySelector('.sm-dust').value || '').trim(),
+                    log_details: Array.isArray(prev.log_details) ? prev.log_details : [],
+                    pending_log_details: Array.isArray(prev.pending_log_details) ? prev.pending_log_details : []
+                };
+            });
+        }
+
+        function openSawMachineModal() {
+            buildSawMachineDraft();
+            renderSawMachineModal();
+            document.getElementById('saw-machine-modal').style.display = 'flex';
+        }
+
+        function closeSawMachineModal() {
+            document.getElementById('saw-machine-modal').style.display = 'none';
+        }
+
+        function finishSawMachineModal(shouldSubmit) {
+            syncSawMachineDraftFromModal();
+            updateSawMainFormFromDraft();
+            closeSawMachineModal();
+            if (shouldSubmit) {
+                const form = document.querySelector('form[action^="/submit_saw"]');
+                if (form) form.requestSubmit();
+            }
+        }
+
+        function calcSawLogConsumedMt(size, length, quantity) {
+            const sizeVal = Number(size) || 0;
+            const lengthVal = Number(length) || 0;
+            const qtyVal = Number(quantity) || 0;
+            if (sizeVal <= 0 || qtyVal <= 0 || lengthVal <= 0) return 0;
+            return (sizeVal * sizeVal * lengthVal * qtyVal) / 115200;
+        }
+
+        function renderSawLogDetailTotal() {
+            const rows = Array.from(document.querySelectorAll('#saw-log-detail-body tr'));
+            const total = rows.reduce((sum, row) => {
+                return sum + calcSawLogConsumedMt(
+                    row.querySelector('.sld-size').value,
+                    row.querySelector('.sld-length').value,
+                    row.querySelector('.sld-qty').value
+                );
+            }, 0);
+            document.getElementById('saw-log-total-value').textContent = total.toFixed(4);
+            rows.forEach(row => {
+                const val = calcSawLogConsumedMt(
+                    row.querySelector('.sld-size').value,
+                    row.querySelector('.sld-length').value,
+                    row.querySelector('.sld-qty').value
+                );
+                row.querySelector('.sld-mt').value = val > 0 ? val.toFixed(4) : '';
+            });
+            renderSawPendingDetailTotal();
+        }
+
+        function renderSawPendingDetailTotal() {
+            const rows = Array.from(document.querySelectorAll('#saw-log-pending-body tr'));
+            const total = rows.reduce((sum, row) => {
+                return sum + calcSawLogConsumedMt(
+                    row.querySelector('.sld-size').value,
+                    row.querySelector('.sld-length').value,
+                    row.querySelector('.sld-qty').value
+                );
+            }, 0);
+            const totalEl = document.getElementById('saw-log-pending-total-value');
+            if (totalEl) totalEl.textContent = total.toFixed(4);
+            rows.forEach(row => {
+                const val = calcSawLogConsumedMt(
+                    row.querySelector('.sld-size').value,
+                    row.querySelector('.sld-length').value,
+                    row.querySelector('.sld-qty').value
+                );
+                row.querySelector('.sld-mt').value = val > 0 ? val.toFixed(4) : '';
+            });
+        }
+
+        function _addSawLogRow(bodyId, detail = {}, focusField = 'size') {
+            const body = document.getElementById(bodyId);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="number" class="sld-size" min="1" value="${detail.size_mm || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td><input type="number" class="sld-qty" min="1" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td>
+                    <select class="sld-length" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:90px; font-size:12px;">
+                        <option value="3"${Number(detail.length_ft || 3) === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
+                        <option value="4"${Number(detail.length_ft || 3) === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
+                    </select>
+                </td>
+                <td><input type="text" class="sld-mt" readonly value="${detail.consumed_mt ? Number(detail.consumed_mt).toFixed(4) : ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px; background:#f8f9fa;"></td>
+                <td><button type="button" onclick="this.closest('tr').remove(); renderSawLogDetailTotal();">{{ texts.delete }}</button></td>
+            `;
+            body.appendChild(tr);
+            const sizeInput = tr.querySelector('.sld-size');
+            const qtyInput = tr.querySelector('.sld-qty');
+            const lengthInput = tr.querySelector('.sld-length');
+            [sizeInput, qtyInput, lengthInput].forEach(input => {
+                input.addEventListener('input', renderSawLogDetailTotal);
+                input.addEventListener('change', renderSawLogDetailTotal);
+            });
+            sizeInput.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                qtyInput.focus();
+                qtyInput.select();
+            });
+            qtyInput.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                _addSawLogRow(bodyId, {}, 'size');
+            });
+            renderSawLogDetailTotal();
+            const target = focusField === 'qty' ? qtyInput : sizeInput;
+            setTimeout(() => {
+                target.focus();
+                target.select();
+            }, 0);
+        }
+
+        function addSawLogDetailRow(detail = {}, focusField = 'size') {
+            _addSawLogRow('saw-log-detail-body', detail, focusField);
+        }
+
+        function addPendingSawLogDetailRow(detail = {}, focusField = 'size') {
+            _addSawLogRow('saw-log-pending-body', detail, focusField);
+        }
+
+        function _collectSawLogRows(bodyId) {
+            const rows = Array.from(document.querySelectorAll(`#${bodyId} tr`));
+            return rows.map(row => {
+                const size_mm = Number(row.querySelector('.sld-size').value || 0);
+                const quantity = Number(row.querySelector('.sld-qty').value || 0);
+                const length_ft = Number(row.querySelector('.sld-length').value || 3);
+                const consumed_mt = calcSawLogConsumedMt(size_mm, length_ft, quantity);
+                return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+        }
+
+        function openSawLogDetailModal(machineNo) {
+            syncSawMachineDraftFromModal();
+            currentSawLogMachineNo = machineNo;
+            const machine = sawMachineDraft.find(item => Number(item.machine_no) === Number(machineNo)) || emptySawMachineRecord(machineNo);
+            document.getElementById('saw-log-machine-label').textContent = `{{ texts.saw_machine_no }} ${machineNo}`;
+            const body = document.getElementById('saw-log-detail-body');
+            const pendingBody = document.getElementById('saw-log-pending-body');
+            body.innerHTML = '';
+            pendingBody.innerHTML = '';
+            const details = Array.isArray(machine.log_details) && machine.log_details.length ? machine.log_details : [{}];
+            details.forEach((detail, idx) => addSawLogDetailRow(detail, idx === 0 ? 'size' : 'size'));
+            const pending = Array.isArray(machine.pending_log_details) && machine.pending_log_details.length ? machine.pending_log_details : [];
+            pending.forEach((detail, idx) => addPendingSawLogDetailRow(detail, idx === 0 ? 'size' : 'size'));
+            renderSawPendingDetailTotal();
+            document.getElementById('saw-log-detail-modal').style.display = 'flex';
+        }
+
+        function closeSawLogDetailModal() {
+            document.getElementById('saw-log-detail-modal').style.display = 'none';
+            currentSawLogMachineNo = null;
+        }
+
+        function saveSawLogDetailModal() {
+            const machineNo = Number(currentSawLogMachineNo || 0);
+            if (!machineNo) {
+                closeSawLogDetailModal();
+                return;
+            }
+            const sourceDetails = _collectSawLogRows('saw-log-detail-body');
+            const pendingDetails = _collectSawLogRows('saw-log-pending-body');
+
+            const netMap = new Map();
+            sourceDetails.forEach(item => {
+                const key = `${item.size_mm}|${item.length_ft}`;
+                if (!netMap.has(key)) netMap.set(key, { size_mm: item.size_mm, length_ft: item.length_ft, quantity: 0 });
+                const row = netMap.get(key);
+                row.quantity += Number(item.quantity || 0);
+            });
+            pendingDetails.forEach(item => {
+                const key = `${item.size_mm}|${item.length_ft}`;
+                if (!netMap.has(key)) netMap.set(key, { size_mm: item.size_mm, length_ft: item.length_ft, quantity: 0 });
+                const row = netMap.get(key);
+                row.quantity -= Number(item.quantity || 0);
+            });
+            const details = Array.from(netMap.values())
+                .filter(item => Number(item.quantity || 0) > 0)
+                .map(item => {
+                    const consumed_mt = calcSawLogConsumedMt(item.size_mm, item.length_ft, item.quantity);
+                    return {
+                        size_mm: Number(item.size_mm || 0),
+                        length_ft: Number(item.length_ft || 3),
+                        quantity: Number(item.quantity || 0),
+                        consumed_mt: Number(consumed_mt.toFixed(4)),
+                    };
+                });
+            const total = details.reduce((sum, item) => sum + Number(item.consumed_mt || 0), 0);
+            sawMachineDraft = sawMachineDraft.map(item => {
+                if (Number(item.machine_no) !== machineNo) return item;
+                return {
+                    ...item,
+                    saw_mt: formatSawNumber(total, 4),
+                    log_details: details,
+                    pending_log_details: pendingDetails,
+                };
+            });
+            renderSawMachineModal();
+            closeSawLogDetailModal();
+        }
+
+        function sortingWidthOptions(selected) {
+            const base = Object.keys(SORTING_SPEC_PCS).map(width => `<option value="${width}"${selected === width ? ' selected' : ''}>${width}</option>`).join('');
+            return `${base}<option value="other"${selected === 'other' ? ' selected' : ''}>Other</option>`;
+        }
+
+        function splitSpecParts(spec) {
+            const text = String(spec || '')
+                .trim()
+                .toLowerCase()
+                .replace(/\s+/g, '')
+                .replace(/[×*]/g, 'x')
+                .replace(/[^0-9x]/g, '');
+            const parts = text.split('x').filter(Boolean);
+            if (parts.length !== 3) return null;
+            if (parts.some(part => !/^\d+$/.test(part))) return null;
+            return parts;
+        }
+
+        function specToDisplay(spec) {
+            const parts = splitSpecParts(spec);
+            if (!parts || !USE_DWL_SPEC_DISPLAY) return String(spec || '').trim();
+            return `${parts[2]}x${parts[1]}x${parts[0]}`;
+        }
+
+        function specToSystem(spec) {
+            const parts = splitSpecParts(spec);
+            if (!parts) return String(spec || '').trim();
+            if (!USE_DWL_SPEC_DISPLAY) return parts.join('x');
+            return `${parts[2]}x${parts[1]}x${parts[0]}`;
+        }
+
+        function formatTrayContentForDisplay(summary) {
+            if (!USE_DWL_SPEC_DISPLAY) return String(summary || '');
+            return String(summary || '').replace(/\d+x\d+x\d+/g, token => specToDisplay(token));
+        }
+
+        function buildSortingSummary(primaryWidth, extras) {
+            if (primaryWidth === 'other') {
+                return '1';
+            }
+            const base = SORTING_SPEC_PCS[primaryWidth];
+            if (!base) return '';
+            const parts = [`${base.spec}x${base.qty}`];
+            (extras || []).forEach(item => {
+                const meta = SORTING_SPEC_PCS[item.width];
+                if (!meta || !item.qty || item.qty <= 0) return;
+                parts.push(`${meta.spec}x${item.qty}`);
+            });
+            return parts.join(' + ');
+        }
+
+        function collectSortTrayEntries() {
+            const rows = Array.from(document.querySelectorAll('#sort-tray-body tr'));
+            const entries = [];
+            rows.forEach(tr => {
+                const trayId = (tr.querySelector('.st-id').value || '').trim();
+                const primaryWidth = tr.querySelector('.st-primary').value;
+                const summary = buildSortingSummary(primaryWidth, tr._extraSpecs || []);
+                if (!trayId || !summary) {
+                    return;
+                }
+                entries.push(`${trayId} ${summary}`);
+            });
+            return entries;
+        }
+
+        function refreshSortTrayPreview() {
+            const entries = collectSortTrayEntries();
+            document.getElementById('sorted_kiln_trays').value = entries.join(', ');
+            const indicator = document.getElementById('sort-staged-indicator');
+            if (indicator) {
+                indicator.textContent = `{{ texts.sort_staged_count }} ${entries.length} {{ texts.unit_kiln_tray }}`;
+                indicator.style.display = entries.length ? 'inline-flex' : 'none';
+            }
+        }
+
+        function renderSortTrayRowSummary(tr) {
+            const primaryWidth = tr.querySelector('.st-primary').value;
+            const fixedQty = tr.querySelector('.st-fixed');
+            const summary = tr.querySelector('.st-summary');
+            const extraWidth = tr.querySelector('.st-extra-width');
+            const extraQty = tr.querySelector('.st-extra-qty');
+            const appendBtn = tr.querySelector('.st-append-btn');
+            const meta = SORTING_SPEC_PCS[primaryWidth];
+            const isOther = primaryWidth === 'other';
+            fixedQty.value = isOther ? '' : (meta ? meta.qty : '');
+            if (extraWidth) extraWidth.disabled = isOther;
+            if (extraQty) extraQty.disabled = isOther;
+            if (appendBtn) appendBtn.disabled = isOther;
+            if (isOther) {
+                tr._extraSpecs = [];
+                if (extraQty) extraQty.value = '';
+            }
+            summary.value = formatTrayContentForDisplay(buildSortingSummary(primaryWidth, tr._extraSpecs || []));
+        }
+
+        function openSortTrayModal() {
+            const body = document.getElementById('sort-tray-body');
+            if (!body.children.length) {
+                addSortTrayRow();
+            }
+            document.getElementById('sort-tray-modal').style.display = 'flex';
+        }
+
+        function closeSortTrayModal() {
+            document.getElementById('sort-tray-modal').style.display = 'none';
+        }
+
+        function addSortTrayRow(trayId = '', primaryWidth = '84') {
+            const body = document.getElementById('sort-tray-body');
+            const tr = document.createElement('tr');
+            tr._extraSpecs = [];
+            tr.innerHTML = `
+                <td><input type="text" class="st-id" value="${trayId}" placeholder="{{ texts.placeholder_tray_id }}" style="height:30px; padding:4px 6px; font-size:12px; width:150px;"></td>
+                <td>
+                    <select class="st-primary" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:92px; font-size:12px;">
+                        ${sortingWidthOptions(primaryWidth)}
+                    </select>
+                </td>
+                <td><input type="text" class="st-fixed" readonly style="width:86px; height:30px; padding:4px 6px; font-size:12px; background:#f8f9fa;"></td>
+                <td>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <select class="st-extra-width" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:92px; font-size:12px;">
+                            ${sortingWidthOptions('44')}
+                        </select>
+                        <button type="button" class="btn-inline st-append-btn" onclick="appendSortTraySpec(this)" style="padding:4px 10px; background:#0d6efd; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.append_spec_btn }}</button>
+                    </div>
+                </td>
+                <td><input type="number" class="st-extra-qty" min="1" placeholder="{{ texts.placeholder_qty }}" style="height:30px; padding:4px 6px; font-size:12px; width:90px;"></td>
+                <td><input type="text" class="st-summary" readonly style="width:100%; min-width:340px; height:30px; padding:4px 6px; font-size:12px; background:#f8f9fa;"></td>
+                <td class="sp-actions" style="width:84px;">
+                    <button type="button" class="btn-inline" onclick="deleteSortTrayRow(this)" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
+                </td>
+            `;
+            body.appendChild(tr);
+            tr.querySelector('.st-primary').addEventListener('change', () => renderSortTrayRowSummary(tr));
+            renderSortTrayRowSummary(tr);
+        }
+
+        function appendSortTraySpec(btn) {
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            const width = tr.querySelector('.st-extra-width').value;
+            const qty = parseInt(tr.querySelector('.st-extra-qty').value || '0', 10);
+            if (!qty || qty <= 0) {
+                alert('{{ texts.invalid_extra_qty_msg }}');
+                return;
+            }
+            tr._extraSpecs = tr._extraSpecs || [];
+            tr._extraSpecs.push({ width, qty });
+            tr.querySelector('.st-extra-qty').value = '';
+            renderSortTrayRowSummary(tr);
+        }
+
+        function saveSortTrayRows() {
+            const entries = collectSortTrayEntries();
+            if (!entries.length) {
+                alert('{{ texts.invalid_tray_entry_msg }}');
+                return;
+            }
+            const trays = entries.map(entry => {
+                const firstSpace = entry.indexOf(' ');
+                return {
+                    id: entry.slice(0, firstSpace).trim(),
+                    content: entry.slice(firstSpace + 1).trim()
+                };
+            });
+            fetch('/api/stage_sort_trays?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trays })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.save_pending_trays_failed }}');
+                document.getElementById('sorted_kiln_trays').value = entries.join(', ');
+                refreshSortTrayPreview();
+                closeSortTrayModal();
+                alert(`{{ texts.sort_stage_saved }}`.replace('{count}', entries.length));
+                storeScrollPosition();
+                location.reload();
+            })
+            .catch(err => alert(err.message || '{{ texts.save_pending_trays_failed }}'));
+        }
+
+        function beforeSubmitSortForm() {
+            const entries = collectSortTrayEntries();
+            document.getElementById('sorted_kiln_trays').value = entries.join(', ');
+            const sortInput = document.getElementById('sort_trays_input');
+            if ((parseInt((sortInput && sortInput.value) || '0', 10) || 0) <= 0) {
+                highlightMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+            } else {
+                clearMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+            }
+            return true;
+        }
+
+        function beforeSubmitSecondarySortForm() {
+            const secondaryInput = document.getElementById('secondary_sort_trays');
+            const hasValue = !!((secondaryInput && secondaryInput.value) || '').trim();
+            if (!hasValue) {
+                highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+                return false;
+            }
+            clearMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+            return true;
+        }
+
+        function highlightMissingInput(input, bubble) {
+            if (input) input.classList.add('input-missing');
+            if (bubble) bubble.style.display = 'inline-flex';
+        }
+
+        function clearMissingInput(input, bubble) {
+            if (input) input.classList.remove('input-missing');
+            if (bubble) bubble.style.display = 'none';
+        }
+
+        function refreshFlowMissingReminders() {
+            const sortInput = document.getElementById('sort_trays_input');
+            const secondaryInput = document.getElementById('secondary_sort_trays');
+            const hour = (new Date()).getHours();
+            if (hour < 16) {
+                clearMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+                clearMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+                return;
+            }
+            const sortVal = parseInt((sortInput && sortInput.value) || '0', 10) || 0;
+            const secondaryHasValue = !!((secondaryInput && secondaryInput.value) || '').trim();
+
+            let sortMissing = CURRENT_DIP_STOCK > 0;
+            let secondaryMissing = CURRENT_KILN_DONE_STOCK > 0;
+            if (DAILY_ENTRY_STATUS.loaded) {
+                sortMissing = !!DAILY_ENTRY_STATUS.missing_sort;
+                secondaryMissing = !!DAILY_ENTRY_STATUS.missing_secondary_sort;
+            }
+
+            if (sortMissing && sortVal <= 0) {
+                highlightMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+            } else {
+                clearMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+            }
+
+            if (secondaryMissing && !secondaryHasValue) {
+                highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+            } else {
+                clearMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+            }
+        }
+
+        async function refreshEntryReminderStrip() {
+            const strip = document.getElementById('entry-reminder-strip');
+            const textEl = document.getElementById('entry-reminder-text');
+            if (!strip || !textEl) return;
+            const hour = (new Date()).getHours();
+            if (hour < 16) {
+                strip.style.display = 'none';
+                return;
+            }
+            try {
+                const res = await fetch('/api/daily_missing_entry_status?lang={{ lang }}');
+                const data = await res.json();
+                DAILY_ENTRY_STATUS = {
+                    loaded: true,
+                    missing_sort: !!(data && data.missing_sort),
+                    missing_secondary_sort: !!(data && data.missing_secondary_sort),
+                };
+                refreshFlowMissingReminders();
+                const items = [];
+                if (data && data.missing_sort) items.push('{{ texts.entry_reminder_sort_missing }}');
+                if (data && data.missing_secondary_sort) items.push('{{ texts.entry_reminder_secondary_missing }}');
+                if (!items.length) {
+                    strip.style.display = 'none';
+                    return;
+                }
+                textEl.textContent = items.join('；');
+                strip.style.display = 'block';
+            } catch (e) {
+                DAILY_ENTRY_STATUS = { loaded: false, missing_sort: false, missing_secondary_sort: false };
+                strip.style.display = 'none';
+            }
+        }
+
+        function deleteSortTrayRow(btn) {
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            tr.remove();
+            refreshSortTrayPreview();
+        }
+
+        function openPendingTrayModal() {
+            fetch('/api/pending_kiln_trays?lang={{ lang }}')
+            .then(r => r.json())
+            .then(data => {
+                const body = document.getElementById('pending-tray-body');
+                body.innerHTML = '';
+                const trays = Array.isArray(data.trays) ? data.trays : [];
+                if (trays.length) {
+                    trays.forEach(t => addPendingTrayRow(t.id || '', t.content || ''));
+                } else if (IS_ADMIN) {
+                    addPendingTrayRow('', '');
+                }
+                document.getElementById('pending-tray-modal').style.display = 'flex';
+            })
+            .catch(() => alert('{{ texts.load_pending_trays_failed }}'));
+        }
+
+        function closePendingTrayModal() {
+            document.getElementById('pending-tray-modal').style.display = 'none';
+        }
+
+        function closeTrayPickerModal() {
+            document.getElementById('tray-picker-modal').style.display = 'none';
+            trayPickerState = { mode: '', kilnId: '', selected: new Set(), dragActive: false, dragValue: true };
+        }
+
+        function setTrayPickerSelection(card, trayId, selected) {
+            if (selected) {
+                trayPickerState.selected.add(trayId);
+                card.classList.add('active');
+            } else {
+                trayPickerState.selected.delete(trayId);
+                card.classList.remove('active');
+            }
+        }
+
+        function renderTrayPickerItems(items) {
+            const grid = document.getElementById('tray-picker-grid');
+            const empty = document.getElementById('tray-picker-empty');
+            grid.innerHTML = '';
+            if (!items.length) {
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            trayPickerState.dragActive = false;
+            trayPickerState.dragValue = true;
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'tray-picker-item';
+                card.dataset.id = item.id;
+                card.innerHTML = `
+                    <div class="tray-picker-id">${item.id}</div>
+                    <div class="tray-picker-meta">${item.meta || ''}</div>
+                `;
+                card.addEventListener('mousedown', (event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    trayPickerState.dragActive = true;
+                    trayPickerState.dragValue = !trayPickerState.selected.has(item.id);
+                    setTrayPickerSelection(card, item.id, trayPickerState.dragValue);
+                });
+                card.addEventListener('mouseenter', () => {
+                    if (!trayPickerState.dragActive) return;
+                    setTrayPickerSelection(card, item.id, trayPickerState.dragValue);
+                });
+                grid.appendChild(card);
+            });
+            grid.onmouseleave = () => {
+                trayPickerState.dragActive = false;
+            };
+            document.onmouseup = () => {
+                trayPickerState.dragActive = false;
+                shipmentPickerState.dragActive = false;
+            };
+        }
+
+        function openTrayPickerModal(mode, kilnId, remainingTrays) {
+            if (mode === 'load') {
+                const sortInput = document.getElementById('sort_trays_input');
+                if ((parseInt((sortInput && sortInput.value) || '0', 10) || 0) <= 0) {
+                    highlightMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
+                }
+            }
+            trayPickerState = { mode, kilnId, selected: new Set(), dragActive: false, dragValue: true };
+            const title = document.getElementById('tray-picker-title');
+            const btn = document.getElementById('tray-picker-confirm-btn');
+            const url = mode === 'load'
+                ? '/api/pending_kiln_trays?lang={{ lang }}'
+                : '/api/kiln_trays/' + encodeURIComponent(kilnId) + '?lang={{ lang }}';
+            title.textContent = mode === 'load'
+                ? `{{ texts.load_picker_title }} ${kilnId}`
+                : `{{ texts.unload_picker_title }} ${kilnId}`;
+            btn.textContent = mode === 'load' ? '{{ texts.load }}' : '{{ texts.unload }}';
+            fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const trays = Array.isArray(data.trays) ? data.trays : [];
+                const items = trays.map(t => ({
+                    id: t.id || '',
+                    meta: (t.content || t.spec || '').trim()
+                })).filter(t => t.id);
+                renderTrayPickerItems(items);
+                document.getElementById('tray-picker-modal').style.display = 'flex';
+            })
+            .catch(() => alert('{{ texts.load_kiln_trays_failed }}'));
+        }
+
+        function submitTrayPickerSelection() {
+            const ids = Array.from(trayPickerState.selected);
+            if (!ids.length) return;
+            const raw = ids.join(',');
+            const kilnId = trayPickerState.kilnId;
+            const mode = trayPickerState.mode;
+            closeTrayPickerModal();
+            if (mode === 'load') {
+                loadKiln(kilnId, raw);
+            } else if (mode === 'unload') {
+                unloadKiln(kilnId, raw);
+            }
+        }
+
+        function addPendingTrayRow(id = '', content = '') {
+            const body = document.getElementById('pending-tray-body');
+            const tr = document.createElement('tr');
+            const readonlyAttr = IS_ADMIN ? '' : 'readonly';
+            const actionCell = IS_ADMIN
+                ? `<td class="sp-actions" style="width:84px;">
+                        <button type="button" class="btn-inline" onclick="this.closest('tr').remove()" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
+                   </td>`
+                : '';
+            tr.innerHTML = `
+                <td><input type="text" class="pt-id" value="${id}" style="height:28px; padding:4px 6px; font-size:12px; width:150px;" ${readonlyAttr}></td>
+                <td><input type="text" class="pt-content" value="${content}" style="height:28px; padding:4px 6px; font-size:12px; width:100%; box-sizing:border-box;" ${readonlyAttr}></td>
+                ${actionCell}
+            `;
+            body.appendChild(tr);
+        }
+
+        function savePendingTrayRows() {
+            const rows = Array.from(document.querySelectorAll('#pending-tray-body tr'));
+            const trays = rows.map(row => ({
+                id: (row.querySelector('.pt-id').value || '').trim(),
+                content: (row.querySelector('.pt-content').value || '').trim()
+            })).filter(item => item.id && item.content);
+
+            fetch('/api/pending_kiln_trays?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trays })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.save_pending_trays_failed }}');
+                closePendingTrayModal();
+                storeScrollPosition();
+                location.reload();
+            })
+            .catch(err => alert(err.message || '{{ texts.save_pending_trays_failed }}'));
+        }
+
+        function submitSecondaryProducts(entries) {
+            if (!Array.isArray(entries) || !entries.length) {
+                alert('{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            const hidden = document.getElementById('finished_product_trays');
+            const confirmHidden = document.getElementById('confirm_missing_secondary_sort');
+            const form = document.getElementById('secondary-products-form');
+            if (!hidden || !form) {
+                alert('form not ready');
+                return;
+            }
+            const secondaryInput = document.getElementById('secondary_sort_trays');
+            const secondaryHasValue = !!((secondaryInput && secondaryInput.value) || '').trim();
+            if (!secondaryHasValue) {
+                highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+                if (!confirm('{{ texts.secondary_sort_missing_confirm }}')) return;
+                if (confirmHidden) confirmHidden.value = '1';
+            } else if (confirmHidden) {
+                confirmHidden.value = '0';
+            }
+            hidden.value = entries.map(e => `${e.id}#${e.spec}#${e.pcs}#${e.grade}`).join(', ');
+            form.submit();
+        }
+
+        const SECONDARY_SPEC_PCS = {
+            '220x81x21': 2160,
+            '270x81x21': 1728,
+            '370x81x21': 1248,
+            '930x81x21': 517,
+            '950x81x21': 517,
+            '970x81x21': 517,
+            '270x68x21': 2160,
+            '370x68x21': 1536,
+            '930x68x21': 654,
+            '950x68x21': 654,
+            '270x58x21': 2304,
+            '370x58x21': 1632,
+            '930x58x21': 705,
+            '950x58x21': 705,
+            '370x44x21': 2208,
+            '950x44x21': 940,
+            '270x44x21': 3024
+        };
+        const SECONDARY_SPEC_EXTRA_PCS = {
+            '950x81x21': [528],
+            '950x68x21': [658]
+        };
+        let secondarySpecRulesLoaded = false;
+        let secondarySpecRuleMap = {};
+        let secondarySpecListSeq = 0;
+        let secondarySpecPopupBound = false;
+
+        function hideAllSecondarySpecPopups(applyDefault = true) {
+            const popups = Array.from(document.querySelectorAll('#secondary-product-body .sp-spec-popup'));
+            popups.forEach(popup => {
+                if (!popup) return;
+                if (applyDefault) {
+                    const cell = popup.parentElement;
+                    const specInput = cell ? cell.querySelector('.sp-spec') : null;
+                    if (specInput && !String(specInput.value || '').trim()) {
+                        const fallback = String(specInput.dataset.defaultSpec || '').trim();
+                        if (fallback) {
+                            specInput.value = fallback;
+                            specInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                }
+                popup.style.display = 'none';
+            });
+        }
+
+        function normalizeSecondarySpec(spec) {
+            const text = specToSystem(spec).toLowerCase().replace(/\s+/g, '');
+            const parts = text.split('x').filter(Boolean);
+            if (parts.length !== 3) return '';
+            const dims = [];
+            for (const p of parts) {
+                const n = Number(p);
+                if (!Number.isFinite(n) || n <= 0) return '';
+                dims.push(String(Math.trunc(n)));
+            }
+            return dims.join('x');
+        }
+
+        function rebuildSecondaryRuleMapWithDefaults() {
+            const out = {};
+            for (const [spec, base] of Object.entries(SECONDARY_SPEC_PCS)) {
+                const key = normalizeSecondarySpec(spec);
+                if (!key) continue;
+                out[key] = [Number(base)];
+            }
+            for (const [spec, extras] of Object.entries(SECONDARY_SPEC_EXTRA_PCS)) {
+                const key = normalizeSecondarySpec(spec);
+                if (!key) continue;
+                if (!out[key]) out[key] = [];
+                (extras || []).forEach(v => {
+                    const iv = Number(v);
+                    if (Number.isFinite(iv) && iv > 0 && !out[key].includes(iv)) out[key].push(iv);
+                });
+            }
+            secondarySpecRuleMap = out;
+        }
+
+        function mergeSecondaryRules(raw) {
+            if (!raw || typeof raw !== 'object') return;
+            for (const [spec, values] of Object.entries(raw)) {
+                const key = normalizeSecondarySpec(spec);
+                if (!key) continue;
+                if (!secondarySpecRuleMap[key]) secondarySpecRuleMap[key] = [];
+                (Array.isArray(values) ? values : []).forEach(v => {
+                    const iv = Number(v);
+                    if (Number.isFinite(iv) && iv > 0 && !secondarySpecRuleMap[key].includes(iv)) {
+                        secondarySpecRuleMap[key].push(iv);
+                    }
+                });
+            }
+        }
+
+        function secondaryFixedValues(spec) {
+            const key = normalizeSecondarySpec(spec);
+            if (!key || !secondarySpecRuleMap[key]) return [];
+            return [...secondarySpecRuleMap[key]];
+        }
+
+        async function loadSecondarySpecRules() {
+            if (secondarySpecRulesLoaded) return;
+            rebuildSecondaryRuleMapWithDefaults();
+            try {
+                const res = await fetch('/api/secondary_spec_rules?lang={{ lang }}');
+                if (!res.ok) throw new Error('load rules failed');
+                const data = await res.json();
+                mergeSecondaryRules(data.rules || {});
+                secondarySpecRulesLoaded = true;
+            } catch (_) {
+                secondarySpecRulesLoaded = true;
+            }
+        }
+
+        async function ensureSecondaryRule(spec, pcs) {
+            const key = normalizeSecondarySpec(spec);
+            const pcsVal = Number(pcs);
+            if (!key || !Number.isFinite(pcsVal) || pcsVal <= 1) return { ok: false, error: '{{ texts.invalid_product_entry_msg }}' };
+            const fixedList = secondaryFixedValues(key);
+            if (fixedList.some(fixed => pcsVal % fixed === 0)) {
+                return { ok: true, spec: key };
+            }
+            try {
+                const res = await fetch('/api/secondary_spec_rules?lang={{ lang }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ spec: key, pcs: pcsVal }),
+                });
+                const data = await res.json();
+                if (!res.ok) return { ok: false, error: data.error || 'save spec rule failed' };
+                mergeSecondaryRules({ [key]: [pcsVal] });
+                return { ok: true, spec: key };
+            } catch (_) {
+                return { ok: false, error: 'save spec rule failed' };
+            }
+        }
+
+        function candidateSpecsByPcs(pcs) {
+            if (!pcs || pcs <= 0) return [];
+            const out = [];
+            for (const spec of Object.keys(secondarySpecRuleMap || {})) {
+                const fixedList = secondaryFixedValues(spec);
+                if (fixedList.some(fixed => pcs % fixed === 0)) out.push(spec);
+            }
+            return out;
+        }
+
+        function calcSpecInfo(spec, pcs) {
+            if (!spec || !pcs || pcs <= 0) return null;
+            const normalized = normalizeSecondarySpec(spec);
+            if (!normalized) return null;
+            const parts = normalized.split('x').map(x => parseFloat(x));
+            if (parts.length !== 3) return null;
+            const m3 = (parts[0] * parts[1] * parts[2] * pcs) / 1000000000.0;
+            return { spec: normalized, m3 };
+        }
+
+        function openSecondaryProductModal() {
+            const secondaryInput = document.getElementById('secondary_sort_trays');
+            if (!((secondaryInput && secondaryInput.value) || '').trim()) {
+                highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
+            }
+            const body = document.getElementById('secondary-product-body');
+            loadSecondarySpecRules().then(() => {
+                if (!body.children.length) {
+                    addSecondaryProductRow();
+                }
+                document.getElementById('secondary-product-modal').style.display = 'flex';
+            });
+        }
+
+        function closeSecondaryProductModal() {
+            hideAllSecondarySpecPopups(false);
+            document.getElementById('secondary-product-modal').style.display = 'none';
+        }
+
+        function addSecondaryProductRow(pid = '', pcs = 1, grade = 'AB') {
+            const body = document.getElementById('secondary-product-body');
+            const tr = document.createElement('tr');
+            const listId = `sp-spec-list-${++secondarySpecListSeq}`;
+            const pcsVal = Number(pcs) > 0 ? Number(pcs) : 1;
+            tr.innerHTML = `
+                <td><input type="text" class="sp-id" value="${pid}" placeholder="{{ texts.placeholder_product_id }}" style="height:28px; padding:4px 6px; font-size:12px; width:180px;"></td>
+                <td><input type="number" class="sp-pcs" min="1" value="${pcsVal}" style="height:28px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td>
+                    <select class="sp-grade" style="height:28px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px; width:92px;">
+                        <option value="AB"${grade === 'AB' ? ' selected' : ''}>AB</option>
+                        <option value="BC"${grade === 'BC' ? ' selected' : ''}>BC</option>
+                        <option value="ABC"${grade === 'ABC' ? ' selected' : ''}>ABC</option>
+                    </select>
+                </td>
+                <td style="position:relative;">
+                    <input type="text" class="sp-spec" list="${listId}" placeholder="${USE_DWL_SPEC_DISPLAY ? '21x81x950' : '950x81x21'}" style="height:28px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:160px; font-size:12px;">
+                    <datalist id="${listId}" class="sp-spec-list"></datalist>
+                    <div class="sp-spec-popup" style="display:none; position:absolute; top:32px; left:0; z-index:30; min-width:168px; max-width:260px; max-height:180px; overflow:auto; background:#fff; color:#0f172a; border:1px solid #d1d5db; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12);"></div>
+                </td>
+                <td><input type="text" class="sp-m3" readonly style="width:86px; height:28px; padding:4px 6px; font-size:12px; background:#f8f9fa;"></td>
+                <td class="sp-actions" style="width:140px;">
+                    <button type="button" class="btn-inline" onclick="saveSecondaryRow(this)" style="padding:3px 10px; background:#28a745; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.save_row_btn }}</button>
+                    <button type="button" class="btn-inline" onclick="this.closest('tr').remove()" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
+                </td>
+            `;
+            body.appendChild(tr);
+            const idInput = tr.querySelector('.sp-id');
+            const pcsInput = tr.querySelector('.sp-pcs');
+            const specInput = tr.querySelector('.sp-spec');
+            const specList = tr.querySelector(`#${listId}`);
+            const specPopup = tr.querySelector('.sp-spec-popup');
+            let lastPcsVal = 0;
+            const hidePopup = () => {
+                if (specPopup) specPopup.style.display = 'none';
+            };
+            const showPopup = (cands) => {
+                if (!specPopup) return;
+                specPopup.innerHTML = '';
+                if (!Array.isArray(cands) || cands.length === 0) {
+                    hidePopup();
+                    return;
+                }
+                cands.forEach(spec => {
+                    const label = specToDisplay(spec);
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.textContent = label;
+                    item.style.display = 'block';
+                    item.style.width = '100%';
+                    item.style.textAlign = 'left';
+                    item.style.padding = '6px 8px';
+                    item.style.border = '0';
+                    item.style.background = '#fff';
+                    item.style.color = '#0f172a';
+                    item.style.fontSize = '12px';
+                    item.style.cursor = 'pointer';
+                    item.addEventListener('mouseenter', () => { item.style.background = '#eef2ff'; });
+                    item.addEventListener('mouseleave', () => { item.style.background = '#fff'; });
+                    item.addEventListener('click', () => {
+                        specInput.value = label;
+                        refresh();
+                        hidePopup();
+                    });
+                    specPopup.appendChild(item);
+                });
+                specPopup.style.display = 'block';
+            };
+            const refresh = () => {
+                const pcsVal = Number(pcsInput.value || 0);
+                const prev = normalizeSecondarySpec(specInput.value);
+                const cands = candidateSpecsByPcs(pcsVal);
+                specList.innerHTML = '';
+                cands.forEach(spec => {
+                    const op = document.createElement('option');
+                    op.value = specToDisplay(spec);
+                    specList.appendChild(op);
+                });
+                if (cands.length > 0) {
+                    if (cands.includes(prev)) {
+                        specInput.value = specToDisplay(prev);
+                    } else if (!prev) {
+                        specInput.value = specToDisplay(cands[0]);
+                    }
+                    specInput.dataset.defaultSpec = specToDisplay(cands[0]);
+                } else {
+                    specInput.dataset.defaultSpec = '';
+                }
+                const info = calcSpecInfo(specInput.value, pcsVal);
+                tr.querySelector('.sp-m3').value = info ? info.m3.toFixed(4) : '';
+                if (pcsVal !== lastPcsVal && cands.length > 0 && typeof specInput.showPicker === 'function') {
+                    try { specInput.showPicker(); } catch (_) {}
+                }
+                if (pcsVal !== lastPcsVal) showPopup(cands);
+                lastPcsVal = pcsVal;
+            };
+            idInput.addEventListener('input', refresh);
+            pcsInput.addEventListener('input', refresh);
+            specInput.addEventListener('change', refresh);
+            specInput.addEventListener('input', refresh);
+            specInput.addEventListener('keydown', (ev) => {
+                if (ev.isComposing) return;
+                if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    if (!String(specInput.value || '').trim()) {
+                        const fallback = String(specInput.dataset.defaultSpec || '').trim();
+                        if (fallback) specInput.value = fallback;
+                    }
+                    hidePopup();
+                    const pidVal = (idInput.value || '').trim();
+                    const pcsVal = Number(pcsInput.value || 0);
+                    const specVal = (specInput.value || '').trim();
+                    if (pidVal && pcsVal > 0 && specVal) {
+                        const next = addSecondaryProductRow();
+                        const nextId = next ? next.querySelector('.sp-id') : null;
+                        if (nextId) nextId.focus();
+                    }
+                    return;
+                }
+                if (ev.key === 'Escape' || ev.key === 'Tab') {
+                    hidePopup();
+                }
+            });
+            specInput.addEventListener('focus', () => {
+                const pcsVal = Number(pcsInput.value || 0);
+                showPopup(candidateSpecsByPcs(pcsVal));
+            });
+            specInput.addEventListener('blur', () => {
+                setTimeout(() => {
+                    if (!String(specInput.value || '').trim()) {
+                        const fallback = String(specInput.dataset.defaultSpec || '').trim();
+                        if (fallback) {
+                            specInput.value = fallback;
+                            specInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                    hidePopup();
+                }, 120);
+            });
+            if (!secondarySpecPopupBound) {
+                document.addEventListener('mousedown', (ev) => {
+                    const target = ev && ev.target ? ev.target : null;
+                    const inside = target && target.closest && target.closest('#secondary-product-body td');
+                    if (!inside) {
+                        hideAllSecondarySpecPopups(true);
+                    }
+                });
+                secondarySpecPopupBound = true;
+            }
+            refresh();
+            return tr;
+        }
+
+        async function saveSecondaryRow(btn) {
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            const pid = (tr.querySelector('.sp-id').value || '').trim();
+            const pcs = Number(tr.querySelector('.sp-pcs').value || 0);
+            const grade = (tr.querySelector('.sp-grade').value || 'AB').trim().toUpperCase();
+            const spec = (tr.querySelector('.sp-spec').value || '').trim();
+            if (!pid || !pcs || pcs <= 0 || !spec) {
+                alert('{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            const info = calcSpecInfo(spec, pcs);
+            if (!info) {
+                alert('{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            const ensured = await ensureSecondaryRule(info.spec, pcs);
+            if (!ensured.ok) {
+                alert(ensured.error || '{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            mergeSecondaryRules({ [ensured.spec || info.spec]: [pcs] });
+            submitSecondaryProducts([{ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3 }]);
+        }
+
+        async function saveSecondaryAllRows() {
+            const rows = Array.from(document.querySelectorAll('#secondary-product-body tr'));
+            let added = 0;
+            const entries = [];
+            for (const tr of rows) {
+                const pid = (tr.querySelector('.sp-id').value || '').trim();
+                const pcs = Number(tr.querySelector('.sp-pcs').value || 0);
+                const grade = (tr.querySelector('.sp-grade').value || 'AB').trim().toUpperCase();
+                const spec = (tr.querySelector('.sp-spec').value || '').trim();
+                if (!pid || !pcs || pcs <= 0 || !spec) continue;
+                const info = calcSpecInfo(spec, pcs);
+                if (!info) continue;
+                const ensured = await ensureSecondaryRule(info.spec, pcs);
+                if (!ensured.ok) {
+                    alert(ensured.error || '{{ texts.invalid_product_entry_msg }}');
+                    return;
+                }
+                mergeSecondaryRules({ [ensured.spec || info.spec]: [pcs] });
+                entries.push({ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3 });
+                added += 1;
+            }
+            if (!added) {
+                alert('{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            submitSecondaryProducts(entries);
+        }
+
+        function finishedInventorySpec(row) {
+            return `${row.L}x${row.W}x${row.D}`;
+        }
+
+        function fillFinishedInventorySelect(selectId, label, values, currentValue) {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+            select.innerHTML = '';
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = `${label}: {{ texts.filter_all }}`;
+            select.appendChild(allOption);
+            values.forEach(value => {
+                const op = document.createElement('option');
+                op.value = value;
+                op.textContent = `${label}: ${value}`;
+                if (value === currentValue) op.selected = true;
+                select.appendChild(op);
+            });
+            select.value = currentValue || '';
+        }
+
+        function uniqueNonEmptyValues(values) {
+            const seen = {};
+            const out = [];
+            (values || []).forEach(function(value) {
+                const key = String(value || '');
+                if (!key || seen[key]) return;
+                seen[key] = true;
+                out.push(key);
+            });
+            return out;
+        }
+
+        function getFinishedInventoryFilters() {
+            const gradeEl = document.getElementById('fi-filter-grade');
+            const dEl = document.getElementById('fi-filter-d');
+            const wEl = document.getElementById('fi-filter-w');
+            const lEl = document.getElementById('fi-filter-l');
+            const pcsEl = document.getElementById('fi-filter-pcs');
+            const m3El = document.getElementById('fi-filter-m3');
+            return {
+                grade: ((gradeEl && gradeEl.value) || '').trim(),
+                d: ((dEl && dEl.value) || '').trim(),
+                w: ((wEl && wEl.value) || '').trim(),
+                l: ((lEl && lEl.value) || '').trim(),
+                pcs: ((pcsEl && pcsEl.value) || '').trim(),
+                m3: ((m3El && m3El.value) || '').trim()
+            };
+        }
+
+        function getFinishedInventoryFilteredRows() {
+            const filters = getFinishedInventoryFilters();
+            return finishedInventoryRows.filter(row => {
+                if (filters.grade && row['等级'] !== filters.grade) return false;
+                if (filters.d && String(row['D']) !== filters.d) return false;
+                if (filters.w && String(row['W']) !== filters.w) return false;
+                if (filters.l && String(row['L']) !== filters.l) return false;
+                if (filters.pcs && String(row['数量']) !== filters.pcs) return false;
+                if (filters.m3 && Number(row['m³'] || 0).toFixed(4) !== filters.m3) return false;
+                return true;
+            });
+        }
+
+        function refreshFinishedInventoryFilterOptions() {
+            const current = getFinishedInventoryFilters();
+            const gradeRows = finishedInventoryRows.filter(row => {
+                if (current.d && String(row['D']) !== current.d) return false;
+                if (current.w && String(row['W']) !== current.w) return false;
+                if (current.l && String(row['L']) !== current.l) return false;
+                if (current.pcs && String(row['数量']) !== current.pcs) return false;
+                if (current.m3 && Number(row['m³'] || 0).toFixed(4) !== current.m3) return false;
+                return true;
+            });
+            const dRows = finishedInventoryRows.filter(row => {
+                if (current.grade && row['等级'] !== current.grade) return false;
+                if (current.w && String(row['W']) !== current.w) return false;
+                if (current.l && String(row['L']) !== current.l) return false;
+                if (current.pcs && String(row['数量']) !== current.pcs) return false;
+                if (current.m3 && Number(row['m³'] || 0).toFixed(4) !== current.m3) return false;
+                return true;
+            });
+            const wRows = finishedInventoryRows.filter(row => {
+                if (current.grade && row['等级'] !== current.grade) return false;
+                if (current.d && String(row['D']) !== current.d) return false;
+                if (current.l && String(row['L']) !== current.l) return false;
+                if (current.pcs && String(row['数量']) !== current.pcs) return false;
+                if (current.m3 && Number(row['m³'] || 0).toFixed(4) !== current.m3) return false;
+                return true;
+            });
+            const lRows = finishedInventoryRows.filter(row => {
+                if (current.grade && row['等级'] !== current.grade) return false;
+                if (current.d && String(row['D']) !== current.d) return false;
+                if (current.w && String(row['W']) !== current.w) return false;
+                if (current.pcs && String(row['数量']) !== current.pcs) return false;
+                if (current.m3 && Number(row['m³'] || 0).toFixed(4) !== current.m3) return false;
+                return true;
+            });
+            const pcsRows = finishedInventoryRows.filter(row => {
+                if (current.grade && row['等级'] !== current.grade) return false;
+                if (current.d && String(row['D']) !== current.d) return false;
+                if (current.w && String(row['W']) !== current.w) return false;
+                if (current.l && String(row['L']) !== current.l) return false;
+                if (current.m3 && Number(row['m³'] || 0).toFixed(4) !== current.m3) return false;
+                return true;
+            });
+            const m3Rows = finishedInventoryRows.filter(row => {
+                if (current.grade && row['等级'] !== current.grade) return false;
+                if (current.d && String(row['D']) !== current.d) return false;
+                if (current.w && String(row['W']) !== current.w) return false;
+                if (current.l && String(row['L']) !== current.l) return false;
+                if (current.pcs && String(row['数量']) !== current.pcs) return false;
+                return true;
+            });
+
+            fillFinishedInventorySelect('fi-filter-grade', '{{ texts.filter_grade }}', uniqueNonEmptyValues(gradeRows.map(row => row['等级'])).sort(), current.grade);
+            fillFinishedInventorySelect('fi-filter-d', 'D', uniqueNonEmptyValues(dRows.map(row => String(row['D']))).sort((a, b) => Number(a) - Number(b)), current.d);
+            fillFinishedInventorySelect('fi-filter-w', 'W', uniqueNonEmptyValues(wRows.map(row => String(row['W']))).sort((a, b) => Number(a) - Number(b)), current.w);
+            fillFinishedInventorySelect('fi-filter-l', 'L', uniqueNonEmptyValues(lRows.map(row => String(row['L']))).sort((a, b) => Number(a) - Number(b)), current.l);
+            fillFinishedInventorySelect('fi-filter-pcs', '{{ texts.filter_pcs }}', uniqueNonEmptyValues(pcsRows.map(row => String(row['数量']))).sort((a, b) => Number(a) - Number(b)), current.pcs);
+            fillFinishedInventorySelect('fi-filter-m3', 'm³', uniqueNonEmptyValues(m3Rows.map(row => Number(row['m³'] || 0).toFixed(4))).sort((a, b) => Number(a) - Number(b)), current.m3);
+        }
+
+        function renderFinishedInventoryRows() {
+            const body = document.getElementById('finished-inventory-body');
+            const rows = getFinishedInventoryFilteredRows();
+            body.innerHTML = '';
+            rows.forEach(row => {
+                const tr = document.createElement('tr');
+                const deleteCell = IS_ADMIN
+                    ? `<td class="sp-actions" style="width:84px;">
+                            <button type="button" class="btn-inline" onclick="deleteFinishedInventoryRow('${row['product_id']}')" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
+                       </td>`
+                    : '';
+                tr.innerHTML = `
+                    <td>${row['编号'] || ''}</td>
+                    <td>${row['D'] || ''}</td>
+                    <td>${row['W'] || ''}</td>
+                    <td>${row['L'] || ''}</td>
+                    <td>${row['数量'] || 0}</td>
+                    <td>${Number(row['m³'] || 0).toFixed(4)}</td>
+                    <td>${row['重量(kg)'] || ''}</td>
+                    <td>${row['等级'] || ''}</td>
+                    <td>库存</td>
+                    <td>${row['规格'] || ''}</td>
+                    ${deleteCell}
+                `;
+                body.appendChild(tr);
+            });
+
+            const exportBtn = document.getElementById('finished-inventory-export');
+            if (exportBtn) {
+                const filters = getFinishedInventoryFilters();
+                const url = new URL('/export/finished_products_current', window.location.origin);
+                url.searchParams.set('lang', '{{ lang }}');
+                if (filters.grade) url.searchParams.set('grade', filters.grade);
+                if (filters.d) url.searchParams.set('d', filters.d);
+                if (filters.w) url.searchParams.set('w', filters.w);
+                if (filters.l) url.searchParams.set('l', filters.l);
+                if (filters.pcs) url.searchParams.set('pcs', filters.pcs);
+                if (filters.m3) url.searchParams.set('m3', filters.m3);
+                exportBtn.dataset.href = url.toString();
+            }
+        }
+
+        function triggerBlobDownload(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename || 'download.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+        }
+
+        function downloadFromUrl(url, fallbackName) {
+            fetch(url, { credentials: 'same-origin' })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('download failed');
+                }
+                const disposition = response.headers.get('Content-Disposition') || '';
+                var filename = fallbackName;
+                if (disposition) {
+                    const utf8Flag = "filename*=UTF-8''";
+                    const utf8Pos = disposition.indexOf(utf8Flag);
+                    if (utf8Pos >= 0) {
+                        const raw = disposition.slice(utf8Pos + utf8Flag.length).split(';')[0].trim();
+                        if (raw) filename = decodeURIComponent(raw);
+                    } else {
+                        const plainFlag = 'filename=';
+                        const plainPos = disposition.toLowerCase().indexOf(plainFlag);
+                        if (plainPos >= 0) {
+                            let raw = disposition.slice(plainPos + plainFlag.length).split(';')[0].trim();
+                            if ((raw[0] === '"' && raw[raw.length - 1] === '"') || (raw[0] === "'" && raw[raw.length - 1] === "'")) {
+                                raw = raw.slice(1, -1);
+                            }
+                            if (raw) filename = raw;
+                        }
+                    }
+                }
+                return response.blob().then(blob => {
+                    triggerBlobDownload(blob, filename);
+                });
+            })
+            .catch(() => {
+                window.location.href = url;
+            });
+        }
+
+        function downloadFromPost(url, payload, fallbackName, failMessage) {
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload || {})
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json()
+                    .then(data => {
+                        throw new Error((data && data.error) || failMessage || 'download failed');
+                    })
+                    .catch(() => {
+                        throw new Error(failMessage || 'download failed');
+                    });
+                }
+                const disposition = response.headers.get('Content-Disposition') || '';
+                let filename = fallbackName;
+                if (disposition) {
+                    const utf8Flag = "filename*=UTF-8''";
+                    const utf8Pos = disposition.indexOf(utf8Flag);
+                    if (utf8Pos >= 0) {
+                        const raw = disposition.slice(utf8Pos + utf8Flag.length).split(';')[0].trim();
+                        if (raw) filename = decodeURIComponent(raw);
+                    } else {
+                        const plainFlag = 'filename=';
+                        const plainPos = disposition.toLowerCase().indexOf(plainFlag);
+                        if (plainPos >= 0) {
+                            let raw = disposition.slice(plainPos + plainFlag.length).split(';')[0].trim();
+                            if ((raw[0] === '"' && raw[raw.length - 1] === '"') || (raw[0] === "'" && raw[raw.length - 1] === "'")) {
+                                raw = raw.slice(1, -1);
+                            }
+                            if (raw) filename = raw;
+                        }
+                    }
+                }
+                return response.blob().then(blob => {
+                    triggerBlobDownload(blob, filename);
+                });
+            })
+            .catch(err => {
+                alert((err && err.message) || (failMessage || 'download failed'));
+            });
+        }
+
+        function downloadFinishedInventory() {
+            const btn = document.getElementById('finished-inventory-export');
+            const url = btn && btn.dataset ? btn.dataset.href : '';
+            if (!url) return;
+            downloadFromUrl(url, 'finished_inventory.xlsx');
+        }
+
+        function downloadFinishedLabels() {
+            const url = new URL('/export/finished_labels', window.location.origin);
+            url.searchParams.set('lang', '{{ lang }}');
+            downloadFromUrl(url.toString(), 'finished_labels.xlsx');
+        }
+
+        function applyFinishedInventoryFilters() {
+            refreshFinishedInventoryFilterOptions();
+            renderFinishedInventoryRows();
+        }
+
+        function openFinishedInventoryModal() {
+            fetch('/api/finished_inventory?lang={{ lang }}')
+            .then(r => r.json())
+            .then(data => {
+                finishedInventoryRows = Array.isArray(data.rows) ? data.rows : [];
+                fillFinishedInventorySelect('fi-filter-grade', '{{ texts.filter_grade }}', uniqueNonEmptyValues(finishedInventoryRows.map(row => row['等级'])).sort(), '');
+                fillFinishedInventorySelect('fi-filter-d', 'D', uniqueNonEmptyValues(finishedInventoryRows.map(row => String(row['D']))).sort((a, b) => Number(a) - Number(b)), '');
+                fillFinishedInventorySelect('fi-filter-w', 'W', uniqueNonEmptyValues(finishedInventoryRows.map(row => String(row['W']))).sort((a, b) => Number(a) - Number(b)), '');
+                fillFinishedInventorySelect('fi-filter-l', 'L', uniqueNonEmptyValues(finishedInventoryRows.map(row => String(row['L']))).sort((a, b) => Number(a) - Number(b)), '');
+                fillFinishedInventorySelect('fi-filter-pcs', '{{ texts.filter_pcs }}', uniqueNonEmptyValues(finishedInventoryRows.map(row => String(row['数量']))).sort((a, b) => Number(a) - Number(b)), '');
+                fillFinishedInventorySelect('fi-filter-m3', 'm³', uniqueNonEmptyValues(finishedInventoryRows.map(row => Number(row['m³'] || 0).toFixed(4))).sort((a, b) => Number(a) - Number(b)), '');
+                renderFinishedInventoryRows();
+                document.getElementById('finished-inventory-modal').style.display = 'flex';
+            });
+        }
+
+        function closeFinishedInventoryModal() {
+            document.getElementById('finished-inventory-modal').style.display = 'none';
+        }
+
+        function updateShipmentSelectedCount() {
+            const el = document.getElementById('shipment-selected-count');
+            if (el) el.textContent = String(selectedShipmentProducts.size);
+        }
+
+        function renderShipmentPicker() {
+            const box = document.getElementById('shipment-product-picker');
+            if (!box) return;
+            if (!window.__shipmentPickerMouseupBound) {
+                document.addEventListener('mouseup', () => {
+                    shipmentPickerState.dragActive = false;
+                });
+                window.__shipmentPickerMouseupBound = true;
+            }
+            box.innerHTML = '';
+            const gradeOrder = { AB: 1, ABC: 2, BC: 3 };
+            const sortedRows = (Array.isArray(shipmentInventoryRows) ? shipmentInventoryRows.slice() : []).sort((a, b) => {
+                const ga = String((a && a['等级']) || '').trim().toUpperCase();
+                const gb = String((b && b['等级']) || '').trim().toUpperCase();
+                const wa = Object.prototype.hasOwnProperty.call(gradeOrder, ga) ? gradeOrder[ga] : 99;
+                const wb = Object.prototype.hasOwnProperty.call(gradeOrder, gb) ? gradeOrder[gb] : 99;
+                if (wa !== wb) return wa - wb;
+                const ida = String((a && (a['编号'] || a.product_id)) || '');
+                const idb = String((b && (b['编号'] || b.product_id)) || '');
+                return ida.localeCompare(idb, undefined, { numeric: true, sensitivity: 'base' });
+            });
+            let lastGrade = null;
+            sortedRows.forEach(row => {
+                const grade = String((row && row['等级']) || '').trim().toUpperCase() || '{{ texts.filter_all }}';
+                if (grade !== lastGrade) {
+                    const divider = document.createElement('div');
+                    divider.className = 'shipment-grade-divider';
+                    divider.textContent = grade;
+                    box.appendChild(divider);
+                    lastGrade = grade;
+                }
+                const item = document.createElement('div');
+                item.className = 'shipment-pick-item';
+                if (selectedShipmentProducts.has(row.product_id)) {
+                    item.classList.add('active');
+                }
+                item.innerHTML = `
+                    <div>
+                        <div class="shipment-pick-code">${row['编号'] || row.product_id}</div>
+                        <div class="shipment-pick-meta">${row['规格'] || ''} | ${row['等级'] || ''} | ${row['数量'] || 0} pcs | ${Number(row['m³'] || 0).toFixed(4)} m³</div>
+                    </div>
+                `;
+                const setSelected = (selected) => {
+                    if (selected) {
+                        selectedShipmentProducts.add(row.product_id);
+                        item.classList.add('active');
+                    } else {
+                        selectedShipmentProducts.delete(row.product_id);
+                        item.classList.remove('active');
+                    }
+                    updateShipmentSelectedCount();
+                };
+                item.addEventListener('mousedown', (event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    shipmentPickerState.dragActive = true;
+                    shipmentPickerState.dragValue = !selectedShipmentProducts.has(row.product_id);
+                    setSelected(shipmentPickerState.dragValue);
+                });
+                item.addEventListener('mouseenter', (event) => {
+                    if (!shipmentPickerState.dragActive) return;
+                    if (!event || (event.buttons & 1) !== 1) {
+                        shipmentPickerState.dragActive = false;
+                        return;
+                    }
+                    setSelected(shipmentPickerState.dragValue);
+                });
+                box.appendChild(item);
+            });
+            if (!shipmentInventoryRows.length) {
+                box.innerHTML = `<div style="padding:12px; color:#6b7280;">{{ texts.tray_picker_empty }}</div>`;
+            }
+            box.onmouseleave = () => {
+                shipmentPickerState.dragActive = false;
+            };
+            updateShipmentSelectedCount();
+        }
+
+        function buildShipmentPayload() {
+            return {
+                customer: (document.getElementById('shipment-customer').value || '').trim(),
+                destination: (document.getElementById('shipment-destination').value || '').trim(),
+                departure_at: (document.getElementById('shipment-departure-at').value || '').trim(),
+                vehicle_no: (document.getElementById('shipment-vehicle-no').value || '').trim(),
+                driver_name: (document.getElementById('shipment-driver-name').value || '').trim(),
+                eta_hours_to_yangon: parseInt(document.getElementById('shipment-eta-hours').value || '36', 10),
+                remark: (document.getElementById('shipment-remark').value || '').trim(),
+                product_ids: Array.from(selectedShipmentProducts)
+            };
+        }
+
+        function exportSelectedShipmentDetails() {
+            const payload = buildShipmentPayload();
+            if (!payload.product_ids.length) {
+                alert('{{ texts.shipment_select_required }}');
+                return;
+            }
+            downloadFromPost(
+                '/export/shipping_selected_details?lang={{ lang }}',
+                payload,
+                'shipment_selected_details.xlsx',
+                '{{ texts.shipment_export_failed }}'
+            );
+        }
+
+        function openCreateShipmentModal() {
+            selectedShipmentProducts = new Set();
+            const departureInput = document.getElementById('shipment-departure-at');
+            if (departureInput && !departureInput.value) {
+                departureInput.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            }
+            fetch('/api/finished_inventory?lang={{ lang }}')
+            .then(r => r.json())
+            .then(data => {
+                shipmentInventoryRows = Array.isArray(data.rows) ? data.rows : [];
+                renderShipmentPicker();
+                document.getElementById('create-shipment-modal').style.display = 'flex';
+            })
+            .catch(() => alert('{{ texts.shipment_create_failed }}'));
+        }
+
+        function closeCreateShipmentModal() {
+            document.getElementById('create-shipment-modal').style.display = 'none';
+        }
+
+        function createShipment() {
+            const payload = buildShipmentPayload();
+            fetch('/api/shipping_orders?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.shipment_create_failed }}');
+                closeCreateShipmentModal();
+                alert(`{{ texts.shipment_create_success }}: ${data.shipment_no || ''}`);
+                storeScrollPosition();
+                location.reload();
+            })
+            .catch(err => alert(err.message || '{{ texts.shipment_create_failed }}'));
+        }
+
+        function renderShippingBoardRows() {
+            const body = document.getElementById('shipping-board-body');
+            body.innerHTML = '';
+            if (!shippingOrderRows.length) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td colspan="12" style="text-align:center; color:#6b7280;">{{ texts.shipment_empty }}</td>`;
+                body.appendChild(tr);
+                return;
+            }
+            shippingOrderRows.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${row.shipment_no || ''}</td>
+                    <td>${row.customer || ''}</td>
+                    <td>${row.destination || ''}</td>
+                    <td>${(row.departure_at || '').replace('T', ' ').slice(0, 16)}</td>
+                    <td>${row.vehicle_no || ''}</td>
+                    <td>${row.driver_name || ''}</td>
+                    <td>${row.eta_hours_to_yangon || 36}</td>
+                    <td>${row.total_pcs || 0} / ${row.product_count || 0}件</td>
+                    <td>${Number(row.total_volume || 0).toFixed(4)}</td>
+                    <td><span class="shipment-status-badge ${shipmentStatusClass(row.status)}">${row.status || ''}</span></td>
+                    <td>${(row.updated_at || row.created_at || '').replace('T', ' ').slice(0, 16)}</td>
+                    <td>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" onclick="updateShipmentStatus('${row.shipment_no}', '仰光仓已到')" style="padding:4px 8px; background:#0d6efd;">{{ texts.mark_signed }}</button>
+                            <button type="button" onclick="updateShipmentStatus('${row.shipment_no}', '已从仰光出港')" style="padding:4px 8px; background:#198754;">{{ texts.mark_yangon_departed }}</button>
+                            <button type="button" onclick="updateShipmentStatus('${row.shipment_no}', '中国港口已到')" style="padding:4px 8px; background:#20c997;">{{ texts.mark_china_arrived }}</button>
+                            <button type="button" onclick="updateShipmentStatus('${row.shipment_no}', '异常')" style="padding:4px 8px; background:#dc3545;">{{ texts.mark_exception }}</button>
+                        </div>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function loadShippingBoard() {
+            fetch('/api/shipping_orders?lang={{ lang }}')
+            .then(r => r.json())
+            .then(data => {
+                shippingOrderRows = Array.isArray(data.rows) ? data.rows : [];
+                renderShippingBoardRows();
+            })
+            .catch(() => alert('{{ texts.shipment_status_update_failed }}'));
+        }
+
+        function openShippingBoardModal() {
+            document.getElementById('shipping-board-modal').style.display = 'flex';
+            loadShippingBoard();
+        }
+
+        function closeShippingBoardModal() {
+            document.getElementById('shipping-board-modal').style.display = 'none';
+        }
+
+        function _todayIsoDate() {
+            const d = new Date();
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            return d.toISOString().slice(0, 10);
+        }
+
+        function _renderDailyRows(tbodyId, dataMap, labelMap, orderedKeys) {
+            const body = document.getElementById(tbodyId);
+            if (!body) return;
+            body.innerHTML = '';
+            const keys = Array.isArray(orderedKeys) && orderedKeys.length
+                ? orderedKeys.filter((k) => Object.prototype.hasOwnProperty.call(dataMap || {}, k))
+                : Object.keys(dataMap || {});
+            keys.forEach((key) => {
+                const tr = document.createElement('tr');
+                const label = (labelMap && labelMap[key]) ? labelMap[key] : key;
+                let value = dataMap[key];
+                if (String(key || '').includes('_m3')) {
+                    const n = Number(value);
+                    if (!Number.isNaN(n)) value = n.toFixed(3);
+                }
+                tr.innerHTML = `<th>${label}</th><td>${value ?? ''}</td>`;
+                body.appendChild(tr);
+            });
+        }
+
+        function openDailyReportModal() {
+            const input = document.getElementById('daily-report-date');
+            if (input && !input.value) input.value = _todayIsoDate();
+            document.getElementById('daily-report-modal').style.display = 'flex';
+            loadDailyReportData();
+        }
+
+        function closeDailyReportModal() {
+            document.getElementById('daily-report-modal').style.display = 'none';
+        }
+
+        function openLogEntryListModal() {
+            document.getElementById('log-entry-list-modal').style.display = 'flex';
+            loadLogEntryList();
+        }
+
+        function closeLogEntryListModal() {
+            document.getElementById('log-entry-list-modal').style.display = 'none';
+        }
+
+        function loadLogEntryList() {
+            const body = document.getElementById('log-entry-list-body');
+            const totalEl = document.getElementById('log-entry-list-total');
+            if (!body || !totalEl) return;
+            fetch('/api/log_entries?lang={{ lang }}&limit=300')
+            .then(r => r.json())
+            .then(data => {
+                const rows = Array.isArray(data.rows) ? data.rows : [];
+                logEntryListRows = rows;
+                body.innerHTML = '';
+                rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    const actions = [];
+                    if (CAN_EXPORT_LOG) {
+                        actions.push(`<button type="button" onclick="exportSingleLogEntry(${Number(row.id || 0)})" style="background:#198754;">{{ texts.export }}</button>`);
+                    }
+                    if (IS_ADMIN) {
+                        actions.push(`<button type="button" onclick="deleteSingleLogEntry(${Number(row.id || 0)})" style="background:#dc3545;">{{ texts.delete }}</button>`);
+                    }
+                    const actionCell = actions.length ? actions.join(' ') : '-';
+                    tr.innerHTML = `<td>${row.created_at || ''}</td><td>${row.driver_name || ''}</td><td>${row.truck_number || ''}</td><td>${Number(row.log_amount || 0).toFixed(4)}</td><td>${actionCell}</td>`;
+                    body.appendChild(tr);
+                });
+                if (!rows.length) {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td colspan="5" style="color:#6b7280;">暂无</td>';
+                    body.appendChild(tr);
+                }
+                totalEl.textContent = Number(data.total_mt || 0).toFixed(4);
+            })
+            .catch(() => {
+                body.innerHTML = '<tr><td colspan="5" style="color:#b91c1c;">加载失败</td></tr>';
+                totalEl.textContent = '0.0000';
+            });
+        }
+
+        function exportSingleLogEntry(logEntryId) {
+            if (!CAN_EXPORT_LOG || !Number(logEntryId || 0)) return;
+            const url = new URL('/export/log_entries_detail', window.location.origin);
+            url.searchParams.set('lang', '{{ lang }}');
+            url.searchParams.set('log_entry_id', String(logEntryId));
+            window.location.href = url.toString();
+        }
+
+        function deleteSingleLogEntry(logEntryId) {
+            if (!IS_ADMIN || !Number(logEntryId || 0)) return;
+            if (!window.confirm('{{ texts.confirm_delete_user }}')) return;
+            fetch(`/api/log_entries/${Number(logEntryId)}?lang={{ lang }}`, { method: 'DELETE' })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error((data && data.error) || 'delete failed');
+                loadLogEntryList();
+            })
+            .catch(err => alert(err.message || 'delete failed'));
+        }
+
+        function exportDailyReportFromModal() {
+            const date = encodeURIComponent((document.getElementById('daily-report-date').value || _todayIsoDate()));
+            window.location.href = `/export/report/daily?lang={{ lang }}&date=${date}`;
+        }
+
+        function loadDailyReportData() {
+            const date = (document.getElementById('daily-report-date').value || _todayIsoDate());
+            fetch(`/api/report/daily?lang={{ lang }}&date=${encodeURIComponent(date)}`)
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || 'load daily report failed');
+                const labels = data.display_labels || {};
+                const order = data.display_order || {};
+                document.getElementById('daily-report-range').textContent = `{{ texts.report_range }}: ${(data.range && data.range.start) || ''} ~ ${(data.range && data.range.end) || ''}`;
+                document.getElementById('daily-report-note').textContent = (data.meta && data.meta.note) || '';
+                _renderDailyRows('daily-report-summary-body', data.summary || {}, labels.summary || {}, order.summary || []);
+                _renderDailyRows('daily-report-inv-body', data.inventory_snapshot || {}, labels.inventory_snapshot || {}, order.inventory_snapshot || []);
+                _renderDailyRows('daily-report-kiln-body', data.kiln_status || {}, labels.kiln_status || {}, order.kiln_status || []);
+                const counts = {};
+                const breakdown = data.breakdown || {};
+                Object.keys(breakdown).forEach((k) => { counts[k] = Array.isArray(breakdown[k]) ? breakdown[k].length : 0; });
+                _renderDailyRows('daily-report-count-body', counts, labels.breakdown || {}, order.breakdown || []);
+            })
+            .catch(err => alert(err.message || 'load daily report failed'));
+        }
+
+        function updateShipmentStatus(shipmentNo, status) {
+            fetch('/api/shipping_orders/' + encodeURIComponent(shipmentNo) + '?lang={{ lang }}', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.shipment_status_update_failed }}');
+                loadShippingBoard();
+            })
+            .catch(err => alert(err.message || '{{ texts.shipment_status_update_failed }}'));
+        }
+
+        function deleteFinishedInventoryRow(productId) {
+            if (!IS_ADMIN || !productId) return;
+            fetch('/api/finished_inventory/' + encodeURIComponent(productId) + '?lang={{ lang }}', {
+                method: 'DELETE'
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || 'delete failed');
+                finishedInventoryRows = finishedInventoryRows.filter(row => row['编号'] !== productId);
+                applyFinishedInventoryFilters();
+            })
+            .catch(err => alert(err.message || 'delete failed'));
+        }
+
+        function openKilnTrayModal(kilnId) {
+            currentKilnId = kilnId;
+            fetch('/api/kiln_trays/' + encodeURIComponent(kilnId) + '?lang={{ lang }}')
+            .then(r => r.json())
+            .then(data => {
+                const body = document.getElementById('kiln-tray-body');
+                body.innerHTML = '';
+                const trays = Array.isArray(data.trays) ? data.trays : [];
+                // 中文注释：优先使用后端返回的权威总托数（含管理员修正值），前端仅做兜底统计。
+                const fallbackTotal = trays.reduce((sum, t) => sum + (Number(t.count) > 0 ? Number(t.count) : 1), 0);
+                const totalInKilnTrays = Number(data.total_trays);
+                const shownTotal = Number.isFinite(totalInKilnTrays) && totalInKilnTrays >= 0 ? totalInKilnTrays : fallbackTotal;
+                document.getElementById('kiln-modal-title').textContent =
+                    '{{ texts.kiln_tray_detail_title }} ' + kilnId + ' | {{ texts.kiln_current_total_trays }}: ' + shownTotal;
+                trays.forEach(t => addKilnTrayRow(t.id || '', t.spec || '', t.count || 1));
+                if (!trays.length) addKilnTrayRow('', '', 1);
+                document.getElementById('kiln-tray-modal').style.display = 'flex';
+            })
+            .catch(() => alert('{{ texts.load_kiln_trays_failed }}'));
+        }
+
+        function closeKilnTrayModal() {
+            document.getElementById('kiln-tray-modal').style.display = 'none';
+            currentKilnId = null;
+        }
+
+        function addKilnTrayRow(id = '', spec = '', count = 1) {
+            const body = document.getElementById('kiln-tray-body');
+            const tr = document.createElement('tr');
+            const readonlyAttr = IS_ADMIN ? '' : 'readonly';
+            const disabledAttr = IS_ADMIN ? '' : 'disabled';
+            const actionCell = IS_ADMIN
+                ? `<td><button type="button" onclick="this.closest('tr').remove()">{{ texts.delete }}</button></td>`
+                : `<td></td>`;
+            tr.innerHTML = `
+                <td><input type="text" class="kt-id" value="${id}" ${readonlyAttr}></td>
+                <td><input type="text" class="kt-spec" value="${spec}" ${readonlyAttr}></td>
+                <td><input type="number" class="kt-count" min="1" value="${count}" ${disabledAttr}></td>
+                ${actionCell}
+            `;
+            body.appendChild(tr);
+        }
+
+        function saveKilnTrays() {
+            if (!IS_ADMIN) {
+                alert('{{ texts.no_admin_perm }}');
+                return;
+            }
+            if (!currentKilnId) return;
+            const rows = Array.from(document.querySelectorAll('#kiln-tray-body tr'));
+            const trays = rows.map(row => ({
+                id: (row.querySelector('.kt-id').value || '').trim(),
+                spec: (row.querySelector('.kt-spec').value || '').trim(),
+                count: parseInt(row.querySelector('.kt-count').value || '0', 10)
+            })).filter(t => t.id && t.count > 0);
+
+            fetch('/api/kiln_trays/' + encodeURIComponent(currentKilnId) + '?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trays })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.save_kiln_trays_failed }}');
+                closeKilnTrayModal();
+                storeScrollPosition();
+                location.reload();
+            })
+            .catch(err => alert(err.message || '{{ texts.save_kiln_trays_failed }}'));
+        }
+
+        function focusLastModalInput(bodySelector, inputSelector) {
+            const body = document.querySelector(bodySelector);
+            if (!body) return;
+            const last = body.querySelector(`tr:last-child ${inputSelector}`);
+            if (last) last.focus();
+        }
+
+        function bindModalEnterShortcuts() {
+            document.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter') return;
+                const target = event.target;
+                if (!target || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
+                const modal = target.closest('.modal-mask');
+                if (!modal || modal.style.display !== 'flex') return;
+
+                let handled = false;
+                if (modal.id === 'sort-tray-modal') {
+                    addSortTrayRow();
+                    focusLastModalInput('#sort-tray-body', '.st-id');
+                    handled = true;
+                } else if (modal.id === 'secondary-product-modal') {
+                    addSecondaryProductRow();
+                    focusLastModalInput('#secondary-product-body', '.sp-id');
+                    handled = true;
+                } else if (modal.id === 'kiln-tray-modal' && IS_ADMIN) {
+                    addKilnTrayRow();
+                    focusLastModalInput('#kiln-tray-body', '.kt-id');
+                    handled = true;
+                } else if (modal.id === 'pending-tray-modal' && IS_ADMIN) {
+                    addPendingTrayRow();
+                    focusLastModalInput('#pending-tray-body', '.pt-id');
+                    handled = true;
+                }
+
+                if (handled) {
+                    event.preventDefault();
+                }
+            });
+        }
+
+        document.addEventListener('submit', (event) => {
+            if (event.target && event.target.tagName === 'FORM') {
+                storeScrollPosition();
+            }
+        }, true);
+
+        ['saw_tm_input', 'saw_trays_input', 'bark_m3_input', 'dust_bags_input'].forEach(id => {
+            const input = document.getElementById(id);
+            if (!input) return;
+            input.addEventListener('input', () => {
+                const hidden = document.getElementById('saw_machine_payload');
+                if (hidden) hidden.value = '';
+            });
+        });
+
+        const logDriverEl = document.getElementById('log-modal-driver');
+        if (logDriverEl) {
+            logDriverEl.addEventListener('input', () => {
+                if (logDriverFetchTimer) clearTimeout(logDriverFetchTimer);
+                logDriverFetchTimer = setTimeout(fetchLogDriverProfile, 260);
+            });
+            logDriverEl.addEventListener('blur', fetchLogDriverProfile);
+        }
+        const logTruckEl = document.getElementById('log-modal-truck');
+        if (logTruckEl) {
+            logTruckEl.addEventListener('blur', fetchLogDriverProfile);
+        }
+
+        const sortInputEl = document.getElementById('sort_trays_input');
+        if (sortInputEl) {
+            sortInputEl.addEventListener('input', refreshFlowMissingReminders);
+            sortInputEl.addEventListener('blur', refreshFlowMissingReminders);
+        }
+        const secondarySortInputEl = document.getElementById('secondary_sort_trays');
+        if (secondarySortInputEl) {
+            secondarySortInputEl.addEventListener('input', refreshFlowMissingReminders);
+            secondarySortInputEl.addEventListener('blur', refreshFlowMissingReminders);
+        }
+        refreshFlowMissingReminders();
+        refreshEntryReminderStrip();
+        setInterval(refreshEntryReminderStrip, 300000);
+        renderOverviewRadar();
+
+        restoreScrollPosition();
+        bindModalEnterShortcuts();
+
+        function openStockAdjustModal(section, value) {
+            document.getElementById('adjust_section').value = section;
+            const valueRow = document.getElementById('adjust_value_row');
+            const byRows = document.getElementById('adjust_byproduct_rows');
+            if (section === 'byproduct') {
+                valueRow.style.display = 'none';
+                byRows.style.display = 'block';
+            } else {
+                valueRow.style.display = 'block';
+                byRows.style.display = 'none';
+                document.getElementById('adjust_value').value = value || '';
+                document.getElementById('adjust_value').step = (section === 'log') ? '0.0001' : ((section === 'dip_chem') ? '0.01' : '1');
+            }
+            document.getElementById('stock-adjust-modal').style.display = 'flex';
+        }
+
+        function openByproductAdjustModal(bark, dust, wasteSegment) {
+            openStockAdjustModal('byproduct', '');
+            document.getElementById('adjust_bark_stock_ks').value = bark || '';
+            document.getElementById('adjust_dust_bag_stock').value = dust || '';
+            document.getElementById('adjust_waste_segment_bag_stock').value = wasteSegment || '';
+        }
+
+        function closeStockAdjustModal() {
+            document.getElementById('stock-adjust-modal').style.display = 'none';
+        }
+
+        function openKilnAdjustModal(kilnId, status, elapsed, remaining, total, left) {
+            document.getElementById('kiln_adjust_id').value = kilnId;
+            document.getElementById('kiln_adjust_status').value = status || 'empty';
+            document.getElementById('kiln_adjust_elapsed').value = elapsed || 0;
+            document.getElementById('kiln_adjust_remaining').value = remaining || 0;
+            document.getElementById('kiln_adjust_total').value = total || '';
+            document.getElementById('kiln_adjust_left').value = left || '';
+            document.getElementById('kiln-adjust-modal').style.display = 'flex';
+        }
+
+        function closeKilnAdjustModal() {
+            document.getElementById('kiln-adjust-modal').style.display = 'none';
+        }
+
+        function submitKilnAdjust(event) {
+            if (event) event.preventDefault();
+            const form = document.getElementById('kiln-adjust-form');
+            if (!form) return false;
+            const data = new URLSearchParams(new FormData(form)).toString();
+            fetch(form.action, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: data
+            })
+            .then(response => response.text())
+            .then(html => {
+                replacePageHtml(html);
+            })
+            .catch(err => {
+                alert(err && err.message ? err.message : 'submit failed');
+            });
+            return false;
+        }
+
+        (function autoHideToast(){
+            const toast = document.getElementById('result-toast');
+            if (!toast) return;
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.3s ease';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 320);
+            }, 3000);
+        })();
+
+        (function clearResultQueryOnce(){
+            try {
+                const url = new URL(window.location.href);
+                if (!url.searchParams.has('result') && !url.searchParams.has('error')) return;
+                url.searchParams.delete('result');
+                url.searchParams.delete('error');
+                const clean = url.pathname + (url.searchParams.toString() ? ('?' + url.searchParams.toString()) : '') + url.hash;
+                window.history.replaceState({}, '', clean);
+            } catch (_) {}
+        })();
+    </script>

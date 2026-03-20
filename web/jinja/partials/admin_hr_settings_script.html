@@ -1,0 +1,27 @@
+    <script>
+        function removeRow(btn) {
+            const tr = btn && btn.closest ? btn.closest('tr') : null;
+            if (tr) tr.remove();
+        }
+        function addTeamRow() {
+            const body = document.querySelector('#team-table tbody');
+            if (!body) return;
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td><input type="text" name="team_name"></td><td><input type="text" name="team_positions"></td><td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get("delete", "删除") }}</button></td>';
+            body.appendChild(tr);
+        }
+        function addSalaryRow() {
+            const body = document.querySelector('#salary-table tbody');
+            if (!body) return;
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td><input type="text" name="salary_type"></td><td><select name="salary_cycle"><option value="weekly" selected>{{ texts.get("hr_cycle_weekly", "weekly（按周）") }}</option><option value="semi_monthly">{{ texts.get("hr_cycle_semi_monthly", "semi_monthly（15天）") }}</option><option value="monthly">{{ texts.get("hr_cycle_monthly", "monthly（按月）") }}</option></select></td><td><input type="text" name="salary_desc"></td><td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get("delete", "删除") }}</button></td>';
+            body.appendChild(tr);
+        }
+        function addOtRow() {
+            const body = document.querySelector('#ot-table tbody');
+            if (!body) return;
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td><input type="number" step="0.1" min="0.1" name="ot_multiplier_option" value="1.5"></td><td><button type="button" class="btn-mini btn-del" onclick="removeRow(this)">{{ texts.get("delete", "删除") }}</button></td>';
+            body.appendChild(tr);
+        }
+    </script>

@@ -284,7 +284,8 @@ def _secondary_rule_map(session):
                 iv = int(float(token))
             except Exception:
                 continue
-            if iv > 0 and iv not in vals:
+            # 业务约束：pcs=1 属于异常历史脏值（会导致任意数量都命中该规格），读取时忽略。
+            if iv > 1 and iv not in vals:
                 vals.append(iv)
         if vals:
             existing = rules.get(spec, [])
@@ -319,7 +320,8 @@ def _save_secondary_rule(session, spec_key: str, values: list[int]):
 def _register_secondary_rule(spec: str, pcs: int):
     spec_key = _normalize_secondary_spec_text(spec)
     pcs_val = _to_int(pcs, 0)
-    if pcs_val <= 0:
+    # 业务约束：pcs=1 会破坏规格自动识别（任意数量都可被 1 整除），禁止写入。
+    if pcs_val <= 1:
         raise ValueError("invalid pcs")
     session = Session()
     try:

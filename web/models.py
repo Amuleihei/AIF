@@ -441,6 +441,7 @@ class KilnState(Base):
     status = Column(String(20), default="empty")
     start = Column(String(50), default="")
     dry_start = Column(String(50), default="")
+    status_changed_at = Column(Integer, default=0)
     completed_time = Column(String(50), default="")
     last_volume = Column(Float, default=0.0)
     unloaded_count = Column(Integer, default=0)

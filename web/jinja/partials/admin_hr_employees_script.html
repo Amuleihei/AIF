@@ -1,0 +1,140 @@
+    <script>
+        var teamPositionsMap = {{ data.team_positions_map | tojson }};
+        var positionLabelMap = {{ data.position_label_map | tojson }};
+        var selectedAttendanceNames = [];
+
+        function toggleAddForm() {
+            var box = document.getElementById('add-form');
+            if (!box) return;
+            closeEditForm();
+            box.style.display = box.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function refreshPositionOptionsByIds(teamId, posId) {
+            var teamEl = document.getElementById(teamId);
+            var posEl = document.getElementById(posId);
+            if (!teamEl || !posEl) return;
+
+            var selectedTeam = teamEl.value || '';
+            var current = posEl.value || '';
+            var positions = [];
+            if (selectedTeam && Array.isArray(teamPositionsMap[selectedTeam])) {
+                positions = teamPositionsMap[selectedTeam];
+            } else {
+                var merged = [];
+                for (var team in teamPositionsMap) {
+                    if (!Array.isArray(teamPositionsMap[team])) continue;
+                    merged = merged.concat(teamPositionsMap[team]);
+                }
+                var seen = {};
+                positions = merged.filter(function(v) {
+                    if (!v || seen[v]) return false;
+                    seen[v] = true;
+                    return true;
+                }).sort();
+            }
+
+            posEl.innerHTML = '<option value="">{{ texts.get("hr_select_position", "请选择岗位") }}</option>';
+            positions.forEach(function(p) {
+                var opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = positionLabelMap[p] || p;
+                if (p === current) opt.selected = true;
+                posEl.appendChild(opt);
+            });
+        }
+
+        function openEditForm(row) {
+            var box = document.getElementById('edit-form');
+            if (!box || !row) return;
+            var addBox = document.getElementById('add-form');
+            if (addBox) addBox.style.display = 'none';
+
+            document.getElementById('edit-original-name').value = row.name || '';
+            document.getElementById('edit-name').value = row.name || '';
+            document.getElementById('edit-team-select').value = row.team || '';
+            refreshPositionOptionsByIds('edit-team-select', 'edit-position-select');
+            document.getElementById('edit-position-select').value = row.position || '';
+            document.getElementById('edit-salary-type-select').value = row.salary_type || '';
+            document.getElementById('edit-salary-value').value = (row.salary_value || 0);
+            document.getElementById('edit-join-date').value = row.join_date || '';
+            document.getElementById('edit-status-select').value = row.status || '在岗';
+            box.style.display = 'block';
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function closeEditForm() {
+            var box = document.getElementById('edit-form');
+            if (!box) return;
+            box.style.display = 'none';
+        }
+
+        function renderSelectedCount() {
+            var el = document.getElementById('selected-count');
+            if (!el) return;
+            el.textContent = '{{ texts.get("selected_label", "已选") }} ' + selectedAttendanceNames.length;
+        }
+
+        function syncAttendanceHiddenFields() {
+            var input = document.getElementById('attendance-batch-names');
+            if (!input) return;
+            input.value = JSON.stringify(selectedAttendanceNames);
+        }
+
+        function toggleEmpCard(card, evt) {
+            if (!card) return;
+            var name = card.getAttribute('data-name') || '';
+            if (!name) return;
+            var modeEl = document.getElementById('select-mode');
+            var mode = modeEl ? modeEl.value : 'multi';
+            if (mode === 'single') {
+                selectedAttendanceNames = [];
+                document.querySelectorAll('.emp-card.selected').forEach(function(x){ x.classList.remove('selected'); });
+            }
+            var idx = selectedAttendanceNames.indexOf(name);
+            if (idx >= 0) {
+                selectedAttendanceNames.splice(idx, 1);
+                card.classList.remove('selected');
+            } else {
+                selectedAttendanceNames.push(name);
+                card.classList.add('selected');
+            }
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        }
+
+        function submitAttendanceBatch(action) {
+            if (!selectedAttendanceNames.length) {
+                alert('{{ texts.get("hr_select_employee", "请选择员工") }}');
+                return;
+            }
+            var actionEl = document.getElementById('attendance-batch-action');
+            if (!actionEl) return;
+            actionEl.value = action || '';
+            syncAttendanceHiddenFields();
+            var formWrap = document.getElementById('attendance-form');
+            if (!formWrap) return;
+            var form = formWrap.querySelector('form');
+            if (!form) return;
+            form.submit();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var teamEl = document.getElementById('team-select');
+            if (teamEl) {
+                teamEl.addEventListener('change', function() {
+                    refreshPositionOptionsByIds('team-select', 'position-select');
+                });
+                refreshPositionOptionsByIds('team-select', 'position-select');
+            }
+            var editTeamEl = document.getElementById('edit-team-select');
+            if (editTeamEl) {
+                editTeamEl.addEventListener('change', function() {
+                    refreshPositionOptionsByIds('edit-team-select', 'edit-position-select');
+                });
+                refreshPositionOptionsByIds('edit-team-select', 'edit-position-select');
+            }
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        });
+    </script>
