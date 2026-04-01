@@ -20,11 +20,13 @@ from web.route_support import (
     save_shipping_data,
     send_file,
     update_inventory_product_status,
+    upsert_inventory_product,
     url_for,
     _build_label_sheet,
     _build_label_workbook_from_template,
     _collect_finished_product_rows,
     _filter_finished_product_rows,
+    _infer_spec_and_volume,
     _load_kilns_data,
     _next_shipment_no,
     _parse_spec_dwl,
@@ -389,6 +391,64 @@ def register_inventory_shipping_routes(app):
         if not ok:
             return jsonify({"error": "not found"}), 404
         return jsonify({"success": True})
+
+    @app.route("/api/finished_inventory/<product_id>", methods=["PATCH"])
+    @login_required
+    def api_update_finished_inventory(product_id):
+        if not current_user.has_permission("admin"):
+            return jsonify({"error": _t("no_admin_perm")}), 403
+
+        payload = request.get_json(silent=True) or {}
+        spec = str(payload.get("spec", "") or "").strip()
+        grade = str(payload.get("grade", "") or "").strip().upper()
+        pcs = _to_int(payload.get("pcs"), 0)
+        weight_kg = _to_float(payload.get("weight_kg"), 0.0)
+
+        if not product_id or not spec or pcs <= 0:
+            return jsonify({"error": _t("invalid_product_entry_msg")}), 400
+        if weight_kg < 0:
+            return jsonify({"error": _t("invalid_product_entry_msg")}), 400
+        if not grade:
+            grade = "AB"
+
+        rows = get_inventory_products_by_ids([product_id])
+        if not rows:
+            return jsonify({"error": "not found"}), 404
+        row = rows[0]
+        if str(row.get("status", "") or "") != "库存":
+            return jsonify({"error": "product unavailable"}), 400
+
+        final_spec, final_volume = _infer_spec_and_volume(product_id, pcs, spec)
+        upsert_inventory_product(
+            product_id=product_id,
+            spec=final_spec,
+            grade=grade,
+            pcs=pcs,
+            volume=final_volume,
+            status="库存",
+            weight_kg=weight_kg,
+        )
+        d_val, w_val, l_val = _parse_spec_dwl(final_spec)
+        code_no, grade_from_id = _split_product_id(product_id, {"grade": grade})
+
+        return jsonify(
+            {
+                "success": True,
+                "row": {
+                    "product_id": product_id,
+                    "编号": code_no,
+                    "D": d_val,
+                    "W": w_val,
+                    "L": l_val,
+                    "数量": pcs,
+                    "m³": round(float(final_volume or 0.0), 4),
+                    "重量(kg)": round(float(weight_kg or 0.0), 2),
+                    "等级": grade_from_id or grade,
+                    "规格": final_spec,
+                    "状态": "库存",
+                },
+            }
+        )
 
     @app.route("/export/finished_labels")
     @login_required

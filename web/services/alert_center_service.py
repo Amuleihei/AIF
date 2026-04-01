@@ -2,12 +2,23 @@ import json
 import os
 import time
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib import request as urllib_request
 
 from tg_bot.config import get_bot_token
 from web.i18n import LANGUAGES
-from web.models import Session, TgSetting, TgUserRole
+from web.models import (
+    Session,
+    TgSetting,
+    TgUserRole,
+    SawRecord,
+    DipRecord,
+    SortRecord,
+    ProductBatch,
+    FlowSecondSortRecord,
+    FlowSelectedTray,
+    FlowSelectedTrayDetail,
+)
 
 
 ALERT_EVENTS_KEY = "alert_engine_events_v1"
@@ -85,6 +96,12 @@ def get_alert_engine_config() -> dict:
         "weight_middle_flow": max(1, min(60, _to_int(cfg.get("weight_middle_flow"), 20))),
         "weight_backlog_health": max(1, min(60, _to_int(cfg.get("weight_backlog_health"), 20))),
         "weight_product_health": max(1, min(60, _to_int(cfg.get("weight_product_health"), 20))),
+        # 0 表示自动推演；>0 表示手工覆盖“药浸/拣选/二选”每托立方
+        "throughput_spec_tray_m3_override": max(0.0, min(5.0, _to_float(cfg.get("throughput_spec_tray_m3_override"), 0.0))),
+        # 原木MT折算m³系数（用于损耗按m³估算）
+        "raw_mt_to_m3_factor": max(0.1, min(3.0, _to_float(cfg.get("raw_mt_to_m3_factor"), 1.0))),
+        # 橡胶木鲜木->干木体积缩水比例（绿材到干材）
+        "kiln_green_to_dry_shrinkage_pct": max(0.0, min(30.0, _to_float(cfg.get("kiln_green_to_dry_shrinkage_pct"), 7.5))),
         "kiln_status_warn_hours": max(12, _to_int(cfg.get("kiln_status_warn_hours"), 24)),
         "kiln_status_critical_hours": max(24, _to_int(cfg.get("kiln_status_critical_hours"), 36)),
     }
@@ -117,6 +134,9 @@ def save_alert_engine_config(values: dict) -> dict:
         "weight_middle_flow": max(1, min(60, _to_int(merged.get("weight_middle_flow"), current["weight_middle_flow"]))),
         "weight_backlog_health": max(1, min(60, _to_int(merged.get("weight_backlog_health"), current["weight_backlog_health"]))),
         "weight_product_health": max(1, min(60, _to_int(merged.get("weight_product_health"), current["weight_product_health"]))),
+        "throughput_spec_tray_m3_override": max(0.0, min(5.0, _to_float(merged.get("throughput_spec_tray_m3_override"), current["throughput_spec_tray_m3_override"]))),
+        "raw_mt_to_m3_factor": max(0.1, min(3.0, _to_float(merged.get("raw_mt_to_m3_factor"), current["raw_mt_to_m3_factor"]))),
+        "kiln_green_to_dry_shrinkage_pct": max(0.0, min(30.0, _to_float(merged.get("kiln_green_to_dry_shrinkage_pct"), current["kiln_green_to_dry_shrinkage_pct"]))),
         "kiln_status_warn_hours": max(12, _to_int(merged.get("kiln_status_warn_hours"), current["kiln_status_warn_hours"])),
         "kiln_status_critical_hours": max(24, _to_int(merged.get("kiln_status_critical_hours"), current["kiln_status_critical_hours"])),
     }
@@ -201,6 +221,23 @@ def _fmt_t(lang: str, key: str, default: str = "", **params) -> str:
         return tpl
 
 
+def _parse_iso_ts(text: str) -> int:
+    s = str(text or "").strip()
+    if not s:
+        return 0
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return int(dt.timestamp())
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return int(datetime.strptime(s, fmt).timestamp())
+        except Exception:
+            continue
+    return 0
+
+
 def _pack_i18n_text(key: str, default: str = "", **params) -> dict:
     return {
         "zh": _fmt_t("zh", key, default=default, **params),
@@ -271,6 +308,258 @@ def _estimate_daily_log_consumption(history: list) -> float:
     delta_mt = max(0.0, _to_float(first.get("log_stock"), 0.0) - _to_float(last.get("log_stock"), 0.0))
     delta_days = max(1.0 / 24.0, (_to_int(last.get("ts"), 0) - _to_int(first.get("ts"), 0)) / 86400.0)
     return max(0.0, delta_mt / delta_days)
+
+
+def _infer_spec_tray_m3(session) -> float:
+    # 由规格自动推演单托立方：优先解析规格字符串，其次尺寸*件数，最后回退。
+    vals = []
+    try:
+        rows0 = session.query(FlowSelectedTrayDetail).limit(1000).all()
+        for r in rows0:
+            text = str(getattr(r, "spec", "") or "")
+            import re
+            m = re.search(r"(\d{2,4})x(\d{2,3})x(\d{1,3})x(\d{1,5})", text)
+            if not m:
+                continue
+            l = _to_int(m.group(1), 0)
+            w = _to_int(m.group(2), 0)
+            t = _to_int(m.group(3), 0)
+            pcs = _to_int(m.group(4), 0)
+            if l < 100:
+                l *= 10
+            v = (float(l) * float(w) * float(t) * float(pcs)) / 1_000_000_000.0
+            if 0.05 <= v <= 2.0:
+                vals.append(v)
+    except Exception:
+        vals = []
+    if vals:
+        return round(sum(vals) / float(len(vals)), 4)
+
+    try:
+        rows = session.query(FlowSelectedTray).limit(600).all()
+        for r in rows:
+            l = _to_float(getattr(r, "length_mm", 0), 0.0)
+            w = _to_float(getattr(r, "width_mm", 0), 0.0)
+            t = _to_float(getattr(r, "thick_mm", 0), 0.0)
+            pcs = _to_float(getattr(r, "pcs", 0), 0.0)
+            if l > 0 and w > 0 and t > 0 and pcs > 0:
+                vals.append((l * w * t * pcs) / 1_000_000_000.0)
+    except Exception:
+        vals = []
+    sane = [v for v in vals if 0.05 <= v <= 2.0]
+    if sane:
+        return round(sum(sane) / float(len(sane)), 4)
+    return 0.53
+
+
+def _sum_stage_range(
+    session,
+    begin_ts: int,
+    end_ts: int,
+    tray_m3_other: float,
+    raw_mt_to_m3_factor: float,
+    kiln_green_to_dry_shrinkage_pct: float,
+) -> dict:
+    saw_trays = 0
+    saw_mt = 0.0
+    dip_trays = 0
+    sort_trays = 0
+    secondary_trays = 0
+    secondary_real_m3 = 0.0
+    product_m3 = 0.0
+
+    try:
+        for r in session.query(SawRecord).all():
+            ts = _parse_iso_ts(getattr(r, "created_at", ""))
+            if begin_ts <= ts <= end_ts:
+                saw_trays += _to_int(getattr(r, "saw_trays", 0), 0)
+                saw_mt += _to_float(getattr(r, "saw_mt", 0.0), 0.0)
+    except Exception:
+        pass
+    try:
+        for r in session.query(DipRecord).all():
+            ts = _parse_iso_ts(getattr(r, "created_at", ""))
+            if begin_ts <= ts <= end_ts:
+                dip_trays += _to_int(getattr(r, "dip_trays", 0), 0)
+    except Exception:
+        pass
+    try:
+        for r in session.query(SortRecord).all():
+            ts = _parse_iso_ts(getattr(r, "created_at", ""))
+            if begin_ts <= ts <= end_ts:
+                sort_trays += _to_int(getattr(r, "sort_trays", 0), 0)
+    except Exception:
+        pass
+    try:
+        for r in session.query(FlowSecondSortRecord).all():
+            ts = _parse_iso_ts(getattr(r, "time", ""))
+            if begin_ts <= ts <= end_ts:
+                secondary_trays += _to_int(getattr(r, "trays", 0), 0)
+                secondary_real_m3 += (
+                    _to_float(getattr(r, "ok_m3", 0.0), 0.0)
+                    + _to_float(getattr(r, "ab_m3", 0.0), 0.0)
+                    + _to_float(getattr(r, "bc_m3", 0.0), 0.0)
+                    + _to_float(getattr(r, "loss_m3", 0.0), 0.0)
+                )
+    except Exception:
+        pass
+    try:
+        for r in session.query(ProductBatch).all():
+            ts = _parse_iso_ts(getattr(r, "created_at", ""))
+            if begin_ts <= ts <= end_ts:
+                product_m3 += _to_float(getattr(r, "total_volume", 0.0), 0.0)
+    except Exception:
+        pass
+
+    # 锯解按固定 0.53 m³/托；其余环节按规格推演系数。
+    saw_m3 = float(saw_trays) * 0.53
+    dip_m3 = float(dip_trays) * float(tray_m3_other)
+    sort_m3 = float(sort_trays) * float(tray_m3_other)
+    secondary_m3_by_tray = float(secondary_trays) * float(tray_m3_other)
+    shrink_ratio = max(0.0, min(0.3, float(kiln_green_to_dry_shrinkage_pct) / 100.0))
+    kiln_out_m3 = float(secondary_real_m3) if secondary_real_m3 > 0 else (float(sort_m3) * (1.0 - shrink_ratio))
+    secondary_m3 = kiln_out_m3 if kiln_out_m3 > 0 else secondary_m3_by_tray
+    raw_input_m3_est = float(saw_mt) * float(raw_mt_to_m3_factor)
+
+    # 三段损耗（按m³）
+    loss_raw_to_saw_m3 = max(0.0, raw_input_m3_est - saw_m3)
+    loss_kiln_in_to_out_m3 = max(0.0, sort_m3 - kiln_out_m3)
+    loss_out_to_product_m3 = max(0.0, kiln_out_m3 - product_m3)
+
+    def _loss_rate(loss: float, base: float) -> float:
+        b = max(0.0001, float(base))
+        return round((float(loss) / b) * 100.0, 2)
+
+    def _ratio(cur: float, prev: float) -> float:
+        p = max(0.0001, float(prev))
+        return round((float(cur) / p) * 100.0, 1)
+
+    return {
+        "saw_trays": int(saw_trays),
+        "dip_trays": int(dip_trays),
+        "sort_trays": int(sort_trays),
+        "secondary_trays": int(secondary_trays),
+        "saw_mt": round(float(saw_mt), 4),
+        "raw_input_m3_est": round(raw_input_m3_est, 4),
+        "saw_m3": round(saw_m3, 4),
+        "dip_m3": round(dip_m3, 4),
+        "sort_m3": round(sort_m3, 4),
+        "secondary_m3": round(secondary_m3, 4),
+        "kiln_out_m3": round(kiln_out_m3, 4),
+        "product_m3": round(max(0.0, product_m3), 4),
+        "loss_raw_to_saw_m3": round(loss_raw_to_saw_m3, 4),
+        "loss_raw_to_saw_rate_pct": _loss_rate(loss_raw_to_saw_m3, raw_input_m3_est),
+        "loss_kiln_in_to_out_m3": round(loss_kiln_in_to_out_m3, 4),
+        "loss_kiln_in_to_out_rate_pct": _loss_rate(loss_kiln_in_to_out_m3, sort_m3),
+        "loss_out_to_product_m3": round(loss_out_to_product_m3, 4),
+        "loss_out_to_product_rate_pct": _loss_rate(loss_out_to_product_m3, secondary_m3),
+        "product_m3_per_raw_mt": round((product_m3 / max(0.0001, saw_mt)), 4),
+        "raw_mt_for_10_product_m3": round((10.0 / max(0.0001, (product_m3 / max(0.0001, saw_mt)))), 4),
+        "ratio_dip_vs_saw": _ratio(dip_m3, saw_m3),
+        "ratio_sort_vs_dip": _ratio(sort_m3, dip_m3),
+        "ratio_secondary_vs_sort": _ratio(secondary_m3, sort_m3),
+        "ratio_product_vs_secondary": _ratio(product_m3, secondary_m3),
+    }
+
+
+def _pct_change(cur: float, base: float):
+    b = float(base)
+    if abs(b) < 1e-6:
+        return None
+    return round(((float(cur) - b) / b) * 100.0, 1)
+
+
+def _build_stage_throughput_payload(lang: str = "zh", cfg: dict | None = None) -> dict:
+    lc = _norm_lang(lang)
+    now = datetime.now()
+    now_ts = int(now.timestamp())
+    day_secs = 86400
+    week_secs = day_secs * 7
+    month_secs = day_secs * 30
+
+    session = Session()
+    try:
+        auto_tray_m3 = _infer_spec_tray_m3(session)
+        override_tray_m3 = _to_float((cfg or {}).get("throughput_spec_tray_m3_override"), 0.0)
+        tray_m3_other = override_tray_m3 if override_tray_m3 > 0 else auto_tray_m3
+        raw_mt_to_m3_factor = _to_float((cfg or {}).get("raw_mt_to_m3_factor"), 1.0)
+        kiln_green_to_dry_shrinkage_pct = _to_float((cfg or {}).get("kiln_green_to_dry_shrinkage_pct"), 7.5)
+        day_cur = _sum_stage_range(session, now_ts - day_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_cur = _sum_stage_range(session, now_ts - week_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_cur = _sum_stage_range(session, now_ts - month_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+
+        day_prev = _sum_stage_range(session, now_ts - 2 * day_secs, now_ts - day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_prev = _sum_stage_range(session, now_ts - 2 * week_secs, now_ts - week_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_prev = _sum_stage_range(session, now_ts - 2 * month_secs, now_ts - month_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+
+        day_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - day_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - week_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - month_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+
+        labels = []
+        saw_arr = []
+        dip_arr = []
+        sort_arr = []
+        sec_arr = []
+        prod_arr = []
+        for d in range(13, -1, -1):
+            end_dt = now - timedelta(days=d)
+            begin_ts = int((end_dt - timedelta(days=1)).timestamp())
+            end_ts = int(end_dt.timestamp())
+            item = _sum_stage_range(session, begin_ts, end_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+            labels.append(end_dt.strftime("%m-%d"))
+            saw_arr.append(item["saw_m3"])
+            dip_arr.append(item["dip_m3"])
+            sort_arr.append(item["sort_m3"])
+            sec_arr.append(item["secondary_m3"])
+            prod_arr.append(item["product_m3"])
+    finally:
+        session.close()
+
+    def _cmp(cur: dict, prev: dict, yoy: dict) -> dict:
+        cur_val = _to_float(cur.get("product_m3"), 0.0)
+        prev_val = _to_float(prev.get("product_m3"), 0.0)
+        yoy_val = _to_float(yoy.get("product_m3"), 0.0)
+        return {
+            "product_m3": round(cur_val, 4),
+            "mom_pct": _pct_change(cur_val, prev_val),
+            "yoy_pct": _pct_change(cur_val, yoy_val),
+        }
+
+    stage_labels = [
+        _t(lc, "throughput_stage_saw", "锯解"),
+        _t(lc, "throughput_stage_dip", "药浸"),
+        _t(lc, "throughput_stage_sort", "拣选"),
+        _t(lc, "throughput_stage_secondary", "二选"),
+        _t(lc, "throughput_stage_product", "成品"),
+    ]
+    return {
+        "tray_coefficients": {
+            "saw_fixed_m3_per_tray": 0.53,
+            "spec_inferred_m3_per_tray": round(tray_m3_other, 4),
+            "spec_auto_inferred_m3_per_tray": round(auto_tray_m3, 4),
+            "spec_override_m3_per_tray": round(override_tray_m3, 4),
+            "raw_mt_to_m3_factor": round(raw_mt_to_m3_factor, 4),
+            "kiln_green_to_dry_shrinkage_pct": round(kiln_green_to_dry_shrinkage_pct, 3),
+        },
+        "current_day": day_cur,
+        "current_week": week_cur,
+        "current_month": month_cur,
+        "comparison": {
+            "day": _cmp(day_cur, day_prev, day_yoy),
+            "week": _cmp(week_cur, week_prev, week_yoy),
+            "month": _cmp(month_cur, month_prev, month_yoy),
+        },
+        "trend_daily": {
+            "labels": labels,
+            "saw_m3": saw_arr,
+            "dip_m3": dip_arr,
+            "sort_m3": sort_arr,
+            "secondary_m3": sec_arr,
+            "product_m3": prod_arr,
+        },
+        "stage_labels": stage_labels,
+    }
 
 
 def _build_rules(stock: dict, cfg: dict, threshold_cfg: dict, history: list, lang: str = "zh") -> list[dict]:
@@ -766,19 +1055,36 @@ def _safe_ratio_score(a: float, b: float) -> float:
     return max(0.0, min(100.0, (lo / hi) * 100.0))
 
 
-def _front_stage_conversion_score(saw_stock: int, dip_stock: int, sorting_stock: int) -> float:
+def _front_stage_conversion_score(point: dict, history: list) -> float:
     """
-    前段转运达成率：
-    - 目标是让前段库存（锯解待药浸 + 药浸待分拣）尽量被消耗并转为待入窑库存。
-    - 分数 = 待入窑 / (锯解库存 + 药浸库存 + 待入窑) * 100
+    前段均衡（效率优先）：
+    - 速度侧：关注 24h 内“锯解消耗”和“药浸消耗”是否同步推进。
+    - 库存侧：锯解/药浸在制库存越少越好（次权重）。
     """
-    saw = max(0, _to_int(saw_stock, 0))
-    dip = max(0, _to_int(dip_stock, 0))
-    sorting = max(0, _to_int(sorting_stock, 0))
-    total = saw + dip + sorting
-    if total <= 0:
-        return 100.0
-    return max(0.0, min(100.0, (float(sorting) / float(total)) * 100.0))
+    ts = _to_int(point.get("ts"), int(time.time()))
+    prev = _history_point_before(history, ts - 24 * 3600)
+
+    prev_saw = _to_int(prev.get("saw_stock"), _to_int(point.get("saw_stock"), 0))
+    prev_dip = _to_int(prev.get("dip_stock"), _to_int(point.get("dip_stock"), 0))
+    cur_saw = _to_int(point.get("saw_stock"), 0)
+    cur_dip = _to_int(point.get("dip_stock"), 0)
+    cur_sorting = _to_int(point.get("sorting_stock"), 0)
+
+    saw_drop = max(0, prev_saw - cur_saw)
+    dip_drop = max(0, prev_dip - cur_dip)
+    saw_exec_score = _drop_ratio_score(prev_saw, cur_saw)
+    dip_exec_score = _drop_ratio_score(prev_dip, cur_dip)
+    stage_match_score = _safe_ratio_score(saw_drop, dip_drop)
+    speed_score = saw_exec_score * 0.35 + dip_exec_score * 0.35 + stage_match_score * 0.30
+
+    front_wip = max(0, cur_saw + cur_dip)
+    all_front = max(1, front_wip + max(0, cur_sorting))
+    inventory_share = float(front_wip) / float(all_front)
+    inventory_score = max(0.0, min(100.0, (1.0 - inventory_share) * 100.0))
+
+    # 速度权重高于库存权重
+    score = speed_score * 0.65 + inventory_score * 0.35
+    return max(0.0, min(100.0, score))
 
 
 def _backlog_score(sorting_stock: int, kiln_done_stock: int) -> float:
@@ -796,6 +1102,38 @@ def _product_band_score(product_count: int, ready: int, full: int, burst: int) -
     if full < c <= burst:
         return max(30.0, 95.0 - (c - full) * 2.0)
     return 10.0
+
+
+def _product_health_score(point: dict, history: list, ready: int, full: int, burst: int) -> float:
+    """
+    成品健康（效率优先）：
+    - 速度侧：关注 24h 内待二选消耗、成品增长与两者匹配度。
+    - 库存侧：延用成品库存区间打分作为次权重。
+    """
+    ts = _to_int(point.get("ts"), int(time.time()))
+    prev = _history_point_before(history, ts - 24 * 3600)
+
+    prev_kiln_done = _to_int(prev.get("kiln_done_stock"), _to_int(point.get("kiln_done_stock"), 0))
+    prev_product = _to_int(prev.get("product_count"), _to_int(point.get("product_count"), 0))
+    cur_kiln_done = _to_int(point.get("kiln_done_stock"), 0)
+    cur_product = _to_int(point.get("product_count"), 0)
+
+    kiln_done_drop = max(0, prev_kiln_done - cur_kiln_done)
+    finished_gain = max(0, cur_product - prev_product)
+    secondary_sort_speed = _drop_ratio_score(prev_kiln_done, cur_kiln_done)
+    conversion_match = _safe_ratio_score(kiln_done_drop, finished_gain)
+
+    if finished_gain > 0:
+        finished_push = min(100.0, 80.0 + float(finished_gain) * 2.5)
+    elif cur_kiln_done <= 2:
+        finished_push = 72.0
+    else:
+        finished_push = 38.0
+
+    efficiency_score = secondary_sort_speed * 0.35 + conversion_match * 0.35 + finished_push * 0.30
+    inventory_score = _product_band_score(cur_product, ready, full, burst)
+    score = efficiency_score * 0.60 + inventory_score * 0.40
+    return max(0.0, min(100.0, score))
 
 
 def _weighted_total_score(vec: dict, cfg: dict) -> float:
@@ -903,12 +1241,19 @@ def _middle_stage_flow_score(point: dict, history: list) -> float:
     timing_score = kiln_health - overdue_ready * 12.0 - overdue_unloading * 10.0 - overdue_drying * 8.0
     timing_score = max(0.0, min(100.0, timing_score))
 
-    score = (
-        sorting_consume_score * 0.25
-        + kiln_done_consume_score * 0.25
-        + finish_push_score * 0.20
-        + timing_score * 0.30
+    speed_score = (
+        sorting_consume_score * 0.30
+        + kiln_done_consume_score * 0.30
+        + finish_push_score * 0.25
+        + timing_score * 0.15
     )
+
+    # 库存仅做轻量约束，避免“高库存但有动作”被一票否决。
+    queue_penalty = 0.0
+    queue_penalty += max(0.0, (cur_sorting - 8) * 0.60)
+    queue_penalty += max(0.0, (cur_kiln_done - 12) * 0.50)
+    queue_penalty = min(18.0, queue_penalty)
+    score = speed_score - queue_penalty
     return max(0.0, min(100.0, score))
 
 
@@ -923,11 +1268,12 @@ def _make_efficiency_vector(point: dict, cfg: dict, history: list) -> dict:
     daily_use = _estimate_daily_log_consumption(history)
     days_left = (log_stock / daily_use) if daily_use > 0 else 7.0
     raw_sec = max(0.0, min(100.0, (days_left / 3.0) * 100.0))
-    front_balance = _front_stage_conversion_score(saw_stock, dip_stock, sorting_stock)
+    front_balance = _front_stage_conversion_score(point, history)
     middle_flow = _middle_stage_flow_score(point, history)
     backlog_health = _backlog_score(sorting_stock, kiln_done_stock)
-    product_health = _product_band_score(
-        product_count,
+    product_health = _product_health_score(
+        point,
+        history,
         _to_int(cfg.get("product_ready_threshold"), 26),
         _to_int(cfg.get("product_full_threshold"), 76),
         _to_int(cfg.get("product_burst_threshold"), 100),
@@ -1147,19 +1493,21 @@ def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh") -> dict:
                 e["last_seen_at_text"] = _format_ts(_to_int(e.get("last_seen_at"), 0))
                 e["resolved_at_text"] = _format_ts(_to_int(e.get("resolved_at"), 0))
 
+        cfg = get_alert_engine_config()
         weekly = _weekly_stats(events)
-        efficiency = _efficiency_summary(_load_json(session, ALERT_HISTORY_KEY, []), cfg=get_alert_engine_config(), lang=lc)
+        efficiency = _efficiency_summary(_load_json(session, ALERT_HISTORY_KEY, []), cfg=cfg, lang=lc)
+        throughput = _build_stage_throughput_payload(lang=lc, cfg=cfg)
         versions = sorted(versions, key=lambda x: _to_int(x.get("ts"), 0), reverse=True)[:30]
         for v in versions:
             v["ts_text"] = _format_ts(_to_int(v.get("ts"), 0))
 
-        cfg = get_alert_engine_config()
         silence_until = _to_int(state.get("silence_until_ts"), 0)
         return {
             "active": active,
             "recent": recent,
             "weekly": weekly,
             "efficiency": efficiency,
+            "throughput": throughput,
             "versions": versions,
             "engine_cfg": cfg,
             "silence_until_ts": silence_until,

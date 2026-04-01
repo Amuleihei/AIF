@@ -531,6 +531,9 @@ def register_auth_admin_routes(app, translate):
                         "weight_middle_flow": request.form.get("weight_middle_flow"),
                         "weight_backlog_health": request.form.get("weight_backlog_health"),
                         "weight_product_health": request.form.get("weight_product_health"),
+                        "throughput_spec_tray_m3_override": request.form.get("throughput_spec_tray_m3_override"),
+                        "raw_mt_to_m3_factor": request.form.get("raw_mt_to_m3_factor"),
+                        "kiln_green_to_dry_shrinkage_pct": request.form.get("kiln_green_to_dry_shrinkage_pct"),
                     }
                 )
                 _audit(
@@ -544,7 +547,10 @@ def register_auth_admin_routes(app, translate):
                         f"bottleneck={saved.get('enable_bottleneck_mode')},"
                         f"relax={saved.get('bottleneck_relax_weight_pct')},"
                         f"bonus2={saved.get('improve_bonus_2day')},"
-                        f"bonus3={saved.get('improve_bonus_3day')}"
+                        f"bonus3={saved.get('improve_bonus_3day')},"
+                        f"tray_m3_override={saved.get('throughput_spec_tray_m3_override')},"
+                        f"raw_mt_to_m3={saved.get('raw_mt_to_m3_factor')},"
+                        f"kiln_shrink={saved.get('kiln_green_to_dry_shrinkage_pct')}"
                     ),
                 )
                 result_msg = "✅ 预警引擎参数已保存"
@@ -557,8 +563,10 @@ def register_auth_admin_routes(app, translate):
                 _audit("set_alert_silence", target="alert_engine", detail=f"minutes={minutes},until={until_ts}")
                 result_msg = "✅ 通知静默已更新"
 
-        data = get_alert_center_payload(lang=get_lang())
-        return render_template_string(ADMIN_ALERT_CENTER_TEMPLATE, data=data, result_msg=result_msg)
+        lang = get_lang()
+        texts = LANGUAGES.get(lang, LANGUAGES["zh"])
+        data = get_alert_center_payload(lang=lang)
+        return render_template_string(ADMIN_ALERT_CENTER_TEMPLATE, data=data, result_msg=result_msg, texts=texts, lang=lang)
 
     @app.route("/admin/alert-center/action", methods=["POST"])
     @login_required

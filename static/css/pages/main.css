@@ -76,10 +76,10 @@ button:hover { background: #218838; }
 .report-mini-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px; }
 .report-mini-card { border:1px solid #e5e7eb; border-radius:8px; padding:6px; background:#fafafa; }
 .report-mini-card h4 { margin:0 0 4px; font-size:14px; color:#374151; }
-.report-mini-table { width:100%; border-collapse:collapse; }
+.report-mini-table { width:100%; border-collapse:collapse; table-layout:fixed; }
 .report-mini-table th, .report-mini-table td { border:1px solid #e5e7eb; padding:4px 6px; font-size:13px; text-align:left; line-height:1.3; }
-.report-mini-table th { background:#f3f4f6; width:68%; }
-.report-mini-table td { width:32%; white-space:nowrap; }
+.report-mini-table th { background:#f3f4f6; width:40%; white-space:nowrap; }
+.report-mini-table td { width:60%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #daily-report-modal .modal-box { width:min(544px, 74vw); max-height:78vh; padding:12px; }
 #daily-report-modal h3 { font-size:18px; }
 #daily-report-modal label,
@@ -93,3 +93,5 @@ button:hover { background: #218838; }
 .report-mini-table tbody tr:nth-child(even) td { background:#edf2f7; }
 #daily-report-kiln-body th { width:20%; white-space:nowrap; }
 #daily-report-kiln-body td { width:80%; white-space:nowrap; }
+#daily-report-summary-body th { width: calc(40% + 5ch); white-space: nowrap; }
+#daily-report-summary-body td { width: calc(60% - 5ch); white-space: nowrap; }

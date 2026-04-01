@@ -301,6 +301,7 @@ class InventoryProduct(Base):
     grade = Column(String(10))
     pcs = Column(Integer, default=0)
     volume = Column(Float, default=0.0)
+    weight_kg = Column(Float, default=0.0)
     status = Column(String(20), default='库存')
 
 class FinanceAccount(Base):

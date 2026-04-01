@@ -42,6 +42,7 @@ FLOW_DEFAULTS = {
     "dust_bag_pool": 0,
     "waste_segment_bag_pool": 0,
     "bark_stock_m3": 0.0,
+    "bark_stock_ks_pool": 0.0,
     "second_sort_ok_m3": 0.0,
     "second_sort_ab_m3": 0.0,
     "second_sort_bc_m3": 0.0,
@@ -65,6 +66,7 @@ FLOW_FLOAT_KEYS = {
     "dip_chem_bag_pool",
     "dip_additive_kg_pool",
     "bark_stock_m3",
+    "bark_stock_ks_pool",
     "second_sort_ok_m3",
     "second_sort_ab_m3",
     "second_sort_bc_m3",
@@ -815,6 +817,7 @@ def _sync_inventory_payload_into_tables(session, data: dict):
             row.grade = str(item.get("grade", "") or "")
             row.pcs = _to_int(item.get("pcs"), 0)
             row.volume = _to_float(item.get("volume"), 0.0)
+            row.weight_kg = _to_float(item.get("weight_kg"), 0.0)
             row.status = str(item.get("status", "库存") or "库存")
         for pid, row in existing.items():
             if pid not in prod_map:
@@ -883,6 +886,9 @@ def ensure_migrated():
             cols = [str(r[1] or "") for r in conn.execute(text("PRAGMA table_info(kiln_states)")).fetchall()]
             if cols and "status_changed_at" not in cols:
                 conn.execute(text("ALTER TABLE kiln_states ADD COLUMN status_changed_at INTEGER DEFAULT 0"))
+            prod_cols = [str(r[1] or "") for r in conn.execute(text("PRAGMA table_info(inventory_product)")).fetchall()]
+            if prod_cols and "weight_kg" not in prod_cols:
+                conn.execute(text("ALTER TABLE inventory_product ADD COLUMN weight_kg REAL DEFAULT 0"))
         _migrate_from_legacy_json_once(session)
         for kid in KILN_IDS:
             if not session.query(KilnState).filter_by(kiln_id=kid).first():
@@ -940,6 +946,7 @@ def get_inventory_data():
                 "grade": str(row.grade or ""),
                 "pcs": _to_int(row.pcs, 0),
                 "volume": _to_float(row.volume, 0.0),
+                "weight_kg": _to_float(getattr(row, "weight_kg", 0.0), 0.0),
                 "status": str(row.status or "库存"),
             }
         return {"raw": raw, "wip": wip, "product": product, "meta": {}}
@@ -1043,7 +1050,15 @@ def get_product_stats():
         session.close()
 
 
-def upsert_inventory_product(product_id: str, spec: str, grade: str, pcs: int, volume: float, status: str = "库存"):
+def upsert_inventory_product(
+    product_id: str,
+    spec: str,
+    grade: str,
+    pcs: int,
+    volume: float,
+    status: str = "库存",
+    weight_kg: float = 0.0,
+):
     ensure_migrated()
     session = Session()
     try:
@@ -1055,6 +1070,7 @@ def upsert_inventory_product(product_id: str, spec: str, grade: str, pcs: int, v
         row.grade = str(grade or "")
         row.pcs = int(pcs or 0)
         row.volume = float(volume or 0.0)
+        row.weight_kg = float(weight_kg or 0.0)
         row.status = str(status or "库存")
         session.commit()
     finally:
@@ -1078,6 +1094,7 @@ def list_inventory_products(status: str = "库存"):
                     "grade": r.grade or "",
                     "pcs": int(r.pcs or 0),
                     "volume": float(r.volume or 0.0),
+                    "weight_kg": float(getattr(r, "weight_kg", 0.0) or 0.0),
                     "status": r.status or "库存",
                 }
             )
@@ -1103,6 +1120,7 @@ def get_inventory_products_by_ids(product_ids: list[str]):
                     "grade": r.grade or "",
                     "pcs": int(r.pcs or 0),
                     "volume": float(r.volume or 0.0),
+                    "weight_kg": float(getattr(r, "weight_kg", 0.0) or 0.0),
                     "status": r.status or "库存",
                 }
             )

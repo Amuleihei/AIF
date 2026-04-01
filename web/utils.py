@@ -161,8 +161,12 @@ def get_stock_data(lang='zh'):
     kiln_done_stock = flow.get('kiln_done_tray_pool', 0)
     dust_bag_stock = flow.get('dust_bag_pool', 0)
     waste_segment_bag_stock = flow.get('waste_segment_bag_pool', 0)
-    bark_stock_m3 = flow.get('bark_stock_m3', 0.0)
-    bark_stock_ks = float(bark_stock_m3) * BARK_PRICE_PER_M3_KS
+    bark_stock_m3 = float(flow.get('bark_stock_m3', 0.0) or 0.0)
+    bark_stock_ks = float(flow.get('bark_stock_ks_pool', 0.0) or 0.0)
+    # 中文注释：树皮库存以 Ks 为权威口径；兼容旧数据（仅有 m³）时自动回退换算。
+    if bark_stock_ks <= 0 and bark_stock_m3 > 0:
+        bark_stock_ks = bark_stock_m3 * BARK_PRICE_PER_M3_KS
+    bark_stock_m3 = bark_stock_ks / BARK_PRICE_PER_M3_KS if bark_stock_ks > 0 else 0.0
 
     shipping = get_shipping_data()
     for item in shipping.get('shipments', []) if isinstance(shipping.get('shipments'), list) else []:
@@ -207,7 +211,11 @@ def get_stock_data(lang='zh'):
             # 中文注释：管理员在后台修正的总托/已出托，视为权威值，优先用于全局展示。
             stored_total_trays = int(kiln_data.get('unloading_total_trays', 0) or 0)
             unloaded_trays = int(kiln_data.get('unloaded_count', 0) or 0)
-            total_trays = stored_total_trays if stored_total_trays > 0 else trays_in_kiln
+            # 中文注释：仅在待出/出窑/完成阶段使用人工修正总托；装窑/烘干阶段以真实窑内托数为准，避免覆盖掉后续入窑数据。
+            if status in {'ready', 'unloading', 'completed'} and stored_total_trays > 0:
+                total_trays = stored_total_trays
+            else:
+                total_trays = trays_in_kiln
             remaining_trays = max(0, total_trays - unloaded_trays)
             if status == 'drying' and ('dry_start' in kiln_data or 'start' in kiln_data):
                 start_time = kiln_data.get('dry_start') or kiln_data.get('start')
@@ -407,5 +415,13 @@ def update_kiln_status(kiln_id, status, trays=None):
         if status != 'completed':
             kiln['unloaded_count'] = 0
             kiln['unloading_total_trays'] = 0
+        else:
+            trays_now = kiln.get('trays', [])
+            tray_total_now = sum(_to_int(t.get('count'), 0) for t in trays_now) if isinstance(trays_now, list) else 0
+            if tray_total_now <= 0:
+                kiln['status'] = 'empty'
+                kiln['trays'] = []
+                kiln['unloaded_count'] = 0
+                kiln['unloading_total_trays'] = 0
 
     save_kilns_data(kilns)

@@ -15,10 +15,12 @@ DAILY_REPORT_TEMPLATE = """
         input[type="date"] { padding:6px; }
         button, .btn { padding: 7px 10px; border: none; border-radius: 6px; background: #0d6efd; color: #fff; text-decoration:none; cursor:pointer; font-size: 13px; }
         .btn.gray { background: #6c757d; }
-        table { width:100%; border-collapse: collapse; margin-top: 8px; background: #fff; }
+        table { width:100%; border-collapse: collapse; margin-top: 8px; background: #fff; table-layout: fixed; }
         th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; font-size: 13px; }
-        th { background: #f3f4f6; }
+        th { background: #f3f4f6; width: 40%; white-space: nowrap; }
+        td { width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .muted { color:#6b7280; font-size: 12px; }
+        .once-warn { margin: 10px 0; padding: 10px 12px; border: 2px solid #b91c1c; border-radius: 8px; background: #fef2f2; color: #7f1d1d; font-weight: 700; }
     </style>
     <script>
         function changeLanguage(lang) {
@@ -37,6 +39,7 @@ DAILY_REPORT_TEMPLATE = """
                 <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ texts.english }}</option>
                 <option value="my" {% if lang == 'my' %}selected{% endif %}>{{ texts.burmese }}</option>
             </select>
+            {% if not one_time_access %}
             <a href="{{ url_for('index', lang=lang) }}" class="btn gray">{{ texts.back_home }}</a>
             <form method="GET" action="{{ url_for('report_daily_page') }}" style="display:flex; gap:8px; align-items:center;">
                 <label>{{ texts.report_date_label }}</label>
@@ -45,7 +48,11 @@ DAILY_REPORT_TEMPLATE = """
                 <button type="submit">{{ texts.query_btn }}</button>
             </form>
             <a class="btn" href="{{ url_for('export_daily_report', date=report.date, lang=lang) }}">{{ texts.export_daily_report }}</a>
+            {% endif %}
         </div>
+        {% if one_time_access %}
+        <div class="once-warn">{{ texts.one_time_daily_link_warning }}</div>
+        {% endif %}
 
         <h1>{{ texts.daily_report_title }} - {{ report.date }}</h1>
         <p class="muted">{{ texts.report_range }}: {{ report.range.start }} ~ {{ report.range.end }}</p>
@@ -55,7 +62,7 @@ DAILY_REPORT_TEMPLATE = """
         <table>
             <tbody>
                 {% for k, v in report.summary.items() %}
-                <tr><th style="width: 320px;">{{ report.display_labels.summary.get(k, k) }}</th><td>{{ v }}</td></tr>
+                <tr><th>{{ report.display_labels.summary.get(k, k) }}</th><td>{{ v }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -64,7 +71,7 @@ DAILY_REPORT_TEMPLATE = """
         <table>
             <tbody>
                 {% for k in report.display_order.inventory_snapshot %}
-                <tr><th style="width: 320px;">{{ report.display_labels.inventory_snapshot.get(k, k) }}</th><td>{{ report.inventory_snapshot.get(k, '') }}</td></tr>
+                <tr><th>{{ report.display_labels.inventory_snapshot.get(k, k) }}</th><td>{{ report.inventory_snapshot.get(k, '') }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -75,7 +82,7 @@ DAILY_REPORT_TEMPLATE = """
             <tbody>
                 {% for k in report.display_order.yield_loss %}
                 <tr>
-                    <th style="width: 320px;">{{ report.display_labels.yield_loss.get(k, k) }}</th>
+                    <th>{{ report.display_labels.yield_loss.get(k, k) }}</th>
                     <td>
                         {% if k.endswith('_pct') %}
                             {{ report.yield_loss.get(k, 0) }}%
@@ -93,7 +100,7 @@ DAILY_REPORT_TEMPLATE = """
         <table>
             <tbody>
                 {% for k in report.display_order.kiln_status %}
-                <tr><th style="width: 320px;">{{ report.display_labels.kiln_status.get(k, k) }}</th><td>{{ report.kiln_status.get(k, '') }}</td></tr>
+                <tr><th>{{ report.display_labels.kiln_status.get(k, k) }}</th><td>{{ report.kiln_status.get(k, '') }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -102,7 +109,7 @@ DAILY_REPORT_TEMPLATE = """
         <table>
             <tbody>
                 {% for k in report.display_order.breakdown %}
-                <tr><th style="width: 320px;">{{ report.display_labels.breakdown.get(k, k) }}</th><td>{{ report.breakdown.get(k, [])|length }}</td></tr>
+                <tr><th>{{ report.display_labels.breakdown.get(k, k) }}</th><td>{{ report.breakdown.get(k, [])|length }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -154,6 +161,7 @@ BOSS_DAILY_REPORT_TEMPLATE = """
         .badge.drying { background: #dbeafe; color: #1d4ed8; }
         .badge.unloading { background: #ffedd5; color: #9a3412; }
         .badge.ready, .badge.completed { background: #dcfce7; color: #166534; }
+        .once-warn { margin: 8px 0; padding: 9px 10px; border: 2px solid #b91c1c; border-radius: 8px; background: #fef2f2; color: #7f1d1d; font-size: 12px; font-weight: 700; }
 
         @media (max-width: 620px) {
             .toolbar { gap: 5px; }
@@ -174,20 +182,27 @@ BOSS_DAILY_REPORT_TEMPLATE = """
 <body>
     <div class="wrap">
         <div class="toolbar">
+            {% if not one_time_access %}
             <a href="{{ url_for('boss_h5', lang=lang) }}" class="btn gray">{{ texts.back_home }}</a>
+            {% endif %}
             <label for="lang-select">{{ texts.language }}:</label>
             <select id="lang-select" onchange="changeLanguage(this.value)">
                 <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ texts.chinese }}</option>
                 <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ texts.english }}</option>
                 <option value="my" {% if lang == 'my' %}selected{% endif %}>{{ texts.burmese }}</option>
             </select>
+            {% if not one_time_access %}
             <form method="GET" action="{{ url_for('report_daily_page') }}" style="display:flex; gap:8px; align-items:center;">
                 <label>{{ texts.report_date_label }}</label>
                 <input type="date" name="date" value="{{ report.date }}">
                 <input type="hidden" name="lang" value="{{ lang }}">
                 <button type="submit" class="btn">{{ texts.query_btn }}</button>
             </form>
+            {% endif %}
         </div>
+        {% if one_time_access %}
+        <div class="once-warn">{{ texts.one_time_daily_link_warning }}</div>
+        {% endif %}
 
         <div class="panel">
             <h1>{{ texts.daily_report_title }} - {{ report.date }}</h1>

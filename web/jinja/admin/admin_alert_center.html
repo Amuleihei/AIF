@@ -28,6 +28,9 @@
         .status.ignored { background:#f8fafc; color:#475569; }
         .status.resolved { background:#f0fdf4; color:#166534; }
         .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        .cfg-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; margin-top:8px; }
+        .cfg-item { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:8px; }
+        .cfg-item .title { font-size:13px; color:#0f172a; font-weight:600; margin-bottom:6px; }
         input, select, button { padding:7px 9px; border:1px solid #cbd5e1; border-radius:6px; }
         button { cursor:pointer; background:#2563eb; color:#fff; border:none; }
         .btn-gray { background:#475569; }
@@ -35,7 +38,8 @@
         .muted { color:#64748b; font-size:12px; }
         .layout { display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; }
         canvas { width:100%; max-width:560px; height:360px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
-        @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .grid, .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .mini-canvas { width:100%; max-width:100%; height:260px; }
+        @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .grid, .grid3, .cfg-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); } }
     </style>
 </head>
 <body>
@@ -81,61 +85,90 @@
                 </div>
                 <form method="POST" action="{{ url_for('admin_alert_center') }}" style="margin-top:10px;">
                     <input type="hidden" name="form_type" value="engine_cfg">
-                    <div class="row">
-                        <label>成品可发货阈值</label><input type="number" min="1" name="product_ready_threshold" value="{{ data.engine_cfg.product_ready_threshold }}" required>
-                        <span class="muted">作用：成品低于该值时，成品健康分会偏低；达到后分数回升。</span>
+                    <div class="cfg-grid">
+                        <div class="cfg-item">
+                            <div class="title">成品可发货阈值</div>
+                            <input type="number" min="1" name="product_ready_threshold" value="{{ data.engine_cfg.product_ready_threshold }}" required>
+                            <div class="muted">成品低于该值时，成品健康分会偏低；达到后分数回升。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">成品满仓阈值</div>
+                            <input type="number" min="1" name="product_full_threshold" value="{{ data.engine_cfg.product_full_threshold }}" required>
+                            <div class="muted">高于该值触发“库存满仓”关键预警（L2）。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">成品爆满阈值</div>
+                            <input type="number" min="1" name="product_burst_threshold" value="{{ data.engine_cfg.product_burst_threshold }}" required>
+                            <div class="muted">高于该值触发“库存爆满”关键预警（L3）。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">通知去重秒</div>
+                            <input type="number" min="60" name="dedup_seconds" value="{{ data.engine_cfg.dedup_seconds }}" required>
+                            <div class="muted">同类预警在该时间内不重复推送 TG，防止刷屏。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">启用瓶颈模式</div>
+                            <select name="enable_bottleneck_mode">
+                                <option value="1" {% if data.engine_cfg.enable_bottleneck_mode == 1 %}selected{% endif %}>开启</option>
+                                <option value="0" {% if data.engine_cfg.enable_bottleneck_mode != 1 %}selected{% endif %}>关闭</option>
+                            </select>
+                            <div class="muted">二次分拣积压高时放宽中段/积压评分，避免雷达图“塌死”。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">瓶颈触发阈值(窑完成托)</div>
+                            <input type="number" min="1" name="bottleneck_kiln_done_threshold" value="{{ data.engine_cfg.bottleneck_kiln_done_threshold }}" required>
+                            <div class="muted">窑完成库存达到该值时进入瓶颈模式。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">瓶颈放宽权重(%)</div>
+                            <input type="number" min="0" max="100" name="bottleneck_relax_weight_pct" value="{{ data.engine_cfg.bottleneck_relax_weight_pct }}" required>
+                            <div class="muted">越大则瓶颈期分数越平缓（建议 20-45）。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">连续2天改善加分</div>
+                            <input type="number" step="0.1" min="0" max="30" name="improve_bonus_2day" value="{{ data.engine_cfg.improve_bonus_2day }}" required>
+                            <div class="muted">积压连续2天下降时，加到中段流速/积压健康。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">连续3天额外加分</div>
+                            <input type="number" step="0.1" min="0" max="30" name="improve_bonus_3day" value="{{ data.engine_cfg.improve_bonus_3day }}" required>
+                            <div class="muted">连续3天下降再追加加分，体现持续改善。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">日平滑窗口</div>
+                            <input type="number" min="1" max="12" name="smooth_day_window_points" value="{{ data.engine_cfg.smooth_day_window_points }}" required>
+                            <div class="muted">越大则日对比更平滑，波动更小。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">周平滑窗口</div>
+                            <input type="number" min="1" max="12" name="smooth_week_window_points" value="{{ data.engine_cfg.smooth_week_window_points }}" required>
+                            <div class="muted">越大则周对比更平滑，趋势更稳。</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">{{ texts.get('throughput_coeff_override_label', '规格系数手工覆盖(m³/托)') }}</div>
+                            <input type="number" step="0.0001" min="0" max="5" name="throughput_spec_tray_m3_override" value="{{ data.engine_cfg.throughput_spec_tray_m3_override }}" required>
+                            <div class="muted">{{ texts.get('throughput_coeff_override_hint', '填0=自动推演；填大于0=强制使用手工值（影响药浸/拣选/二选 m³）。') }}</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">{{ texts.get('throughput_raw_mt_to_m3_label', '原木 MT→m³ 系数') }}</div>
+                            <input type="number" step="0.0001" min="0.1" max="3" name="raw_mt_to_m3_factor" value="{{ data.engine_cfg.raw_mt_to_m3_factor }}" required>
+                            <div class="muted">{{ texts.get('throughput_raw_mt_to_m3_hint', '用于“原木到锯解损耗”按m³估算。默认1.0，可按现场校准。') }}</div>
+                        </div>
+                        <div class="cfg-item">
+                            <div class="title">{{ texts.get('throughput_kiln_shrink_label', '鲜木→干木缩水(%)') }}</div>
+                            <input type="number" step="0.1" min="0" max="30" name="kiln_green_to_dry_shrinkage_pct" value="{{ data.engine_cfg.kiln_green_to_dry_shrinkage_pct }}" required>
+                            <div class="muted">{{ texts.get('throughput_kiln_shrink_hint', '用于“入窑→出窑损耗”估算；有二选实际m³时优先用实际值。') }}</div>
+                        </div>
                     </div>
-                    <div class="row">
-                        <label>成品满仓阈值</label><input type="number" min="1" name="product_full_threshold" value="{{ data.engine_cfg.product_full_threshold }}" required>
-                        <span class="muted">作用：高于该值触发“库存满仓”关键预警（L2）。</span>
-                    </div>
-                    <div class="row">
-                        <label>成品爆满阈值</label><input type="number" min="1" name="product_burst_threshold" value="{{ data.engine_cfg.product_burst_threshold }}" required>
-                        <span class="muted">作用：高于该值触发“库存爆满”关键预警（L3）。</span>
-                    </div>
-                    <div class="row">
-                        <label>通知去重秒</label><input type="number" min="60" name="dedup_seconds" value="{{ data.engine_cfg.dedup_seconds }}" required>
-                        <span class="muted">作用：同类预警在该时间内不重复推送 TG，防止刷屏。</span>
-                    </div>
-                    <div class="row">
-                        <label>启用瓶颈模式</label>
-                        <select name="enable_bottleneck_mode">
-                            <option value="1" {% if data.engine_cfg.enable_bottleneck_mode == 1 %}selected{% endif %}>开启</option>
-                            <option value="0" {% if data.engine_cfg.enable_bottleneck_mode != 1 %}selected{% endif %}>关闭</option>
-                        </select>
-                        <span class="muted">作用：当二次分拣积压较高时，放宽中段/积压评分，避免雷达图“塌死”。</span>
-                    </div>
-                    <div class="row">
-                        <label>瓶颈触发阈值(窑完成托)</label><input type="number" min="1" name="bottleneck_kiln_done_threshold" value="{{ data.engine_cfg.bottleneck_kiln_done_threshold }}" required>
-                        <span class="muted">作用：窑完成库存达到该值时，系统判定进入瓶颈模式。</span>
-                    </div>
-                    <div class="row">
-                        <label>瓶颈放宽权重(%)</label><input type="number" min="0" max="100" name="bottleneck_relax_weight_pct" value="{{ data.engine_cfg.bottleneck_relax_weight_pct }}" required>
-                        <span class="muted">作用：越大则瓶颈期分数越平缓（建议 20-45）。</span>
-                    </div>
-                    <div class="row">
-                        <label>连续2天改善加分</label><input type="number" step="0.1" min="0" max="30" name="improve_bonus_2day" value="{{ data.engine_cfg.improve_bonus_2day }}" required>
-                        <span class="muted">作用：积压连续2天下降时，加到中段流速/积压健康。</span>
-                    </div>
-                    <div class="row">
-                        <label>连续3天额外加分</label><input type="number" step="0.1" min="0" max="30" name="improve_bonus_3day" value="{{ data.engine_cfg.improve_bonus_3day }}" required>
-                        <span class="muted">作用：连续3天下降再追加加分，体现持续改善。</span>
-                    </div>
-                    <div class="row">
-                        <label>日平滑窗口</label><input type="number" min="1" max="12" name="smooth_day_window_points" value="{{ data.engine_cfg.smooth_day_window_points }}" required>
-                        <span class="muted">作用：越大则日对比更平滑，波动更小。</span>
-                    </div>
-                    <div class="row">
-                        <label>周平滑窗口</label><input type="number" min="1" max="12" name="smooth_week_window_points" value="{{ data.engine_cfg.smooth_week_window_points }}" required>
-                        <span class="muted">作用：越大则周对比更平滑，趋势更稳。</span>
-                    </div>
-                    <div class="row">
-                        <label>总分权重-原木保障</label><input type="number" min="1" max="60" name="weight_raw_security" value="{{ data.engine_cfg.weight_raw_security }}" required>
-                        <label>总分权重-前段均衡</label><input type="number" min="1" max="60" name="weight_front_balance" value="{{ data.engine_cfg.weight_front_balance }}" required>
-                        <label>总分权重-中段流速</label><input type="number" min="1" max="60" name="weight_middle_flow" value="{{ data.engine_cfg.weight_middle_flow }}" required>
-                        <label>总分权重-积压健康</label><input type="number" min="1" max="60" name="weight_backlog_health" value="{{ data.engine_cfg.weight_backlog_health }}" required>
-                        <label>总分权重-成品健康</label><input type="number" min="1" max="60" name="weight_product_health" value="{{ data.engine_cfg.weight_product_health }}" required>
-                        <span class="muted">作用：控制五维对“总分”的影响比例（相对权重，不要求和=100）。</span>
+                    <div class="cfg-item" style="margin-top:10px;">
+                        <div class="title">总分权重（相对权重，不要求和=100）</div>
+                        <div class="cfg-grid" style="margin-top:4px;">
+                            <div class="row"><label>原木保障</label><input type="number" min="1" max="60" name="weight_raw_security" value="{{ data.engine_cfg.weight_raw_security }}" required></div>
+                            <div class="row"><label>前段均衡</label><input type="number" min="1" max="60" name="weight_front_balance" value="{{ data.engine_cfg.weight_front_balance }}" required></div>
+                            <div class="row"><label>中段流速</label><input type="number" min="1" max="60" name="weight_middle_flow" value="{{ data.engine_cfg.weight_middle_flow }}" required></div>
+                            <div class="row"><label>积压健康</label><input type="number" min="1" max="60" name="weight_backlog_health" value="{{ data.engine_cfg.weight_backlog_health }}" required></div>
+                            <div class="row"><label>成品健康</label><input type="number" min="1" max="60" name="weight_product_health" value="{{ data.engine_cfg.weight_product_health }}" required></div>
+                        </div>
                     </div>
                     <div class="row">
                         <button type="submit">保存</button>
@@ -149,6 +182,131 @@
                         <button type="submit" class="btn-gray">设置静默</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="justify-content:space-between;">
+                <strong>{{ texts.get('throughput_center_title', '环节产比 (m³)') }}</strong>
+                <div class="muted">
+                    {{ texts.get('throughput_coeff_saw_label', '锯解固定系数') }}: 0.53 m³/托 |
+                    {{ texts.get('throughput_coeff_spec_label', '规格推演系数') }}: {{ data.throughput.tray_coefficients.spec_inferred_m3_per_tray }} m³/托
+                    {% if data.throughput.tray_coefficients.spec_override_m3_per_tray > 0 %}
+                    | {{ texts.get('throughput_coeff_override_active', '手工覆盖') }}: {{ data.throughput.tray_coefficients.spec_override_m3_per_tray }} m³/托
+                    {% endif %}
+                    | {{ texts.get('throughput_raw_mt_to_m3_label', '原木 MT→m³ 系数') }}: {{ data.throughput.tray_coefficients.raw_mt_to_m3_factor }}
+                    | {{ texts.get('throughput_kiln_shrink_label', '鲜木→干木缩水(%)') }}: {{ data.throughput.tray_coefficients.kiln_green_to_dry_shrinkage_pct }}%
+                </div>
+            </div>
+            <table style="margin-top:10px;">
+                <thead>
+                    <tr>
+                        <th>{{ texts.get('throughput_period', '周期') }}</th>
+                        <th>{{ texts.get('throughput_stage_saw', '锯解') }} m³</th>
+                        <th>{{ texts.get('throughput_stage_dip', '药浸') }} m³</th>
+                        <th>{{ texts.get('throughput_stage_sort', '拣选') }} m³</th>
+                        <th>{{ texts.get('throughput_stage_secondary', '二选') }} m³</th>
+                        <th>{{ texts.get('throughput_stage_product', '成品') }} m³</th>
+                        <th>{{ texts.get('throughput_ratio_chain', '产比链') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{ texts.get('throughput_period_day', '当日') }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_day.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_day.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_day.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_day.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_day.product_m3) }}</td>
+                        <td class="muted">D/S {{ data.throughput.current_day.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_day.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_day.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_day.ratio_product_vs_secondary }}%</td>
+                    </tr>
+                    <tr>
+                        <td>{{ texts.get('throughput_period_week', '当周') }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_week.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_week.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_week.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_week.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_week.product_m3) }}</td>
+                        <td class="muted">D/S {{ data.throughput.current_week.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_week.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_week.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_week.ratio_product_vs_secondary }}%</td>
+                    </tr>
+                    <tr>
+                        <td>{{ texts.get('throughput_period_month', '当月') }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_month.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_month.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_month.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_month.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(data.throughput.current_month.product_m3) }}</td>
+                        <td class="muted">D/S {{ data.throughput.current_month.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_month.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_month.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_month.ratio_product_vs_secondary }}%</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="grid3" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('throughput_period_day', '当日') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
+                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.day.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.day.mom_pct if data.throughput.comparison.day.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.day.yoy_pct if data.throughput.comparison.day.yoy_pct is not none else '--' }}%</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('throughput_period_week', '当周') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
+                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.week.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.week.mom_pct if data.throughput.comparison.week.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.week.yoy_pct if data.throughput.comparison.week.yoy_pct is not none else '--' }}%</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('throughput_period_month', '当月') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
+                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.month.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.month.mom_pct if data.throughput.comparison.month.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.month.yoy_pct if data.throughput.comparison.month.yoy_pct is not none else '--' }}%</div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:10px;background:#fff;">
+                <strong>{{ texts.get('throughput_loss_title', '各环节损耗 (m³)') }}</strong>
+                <table style="margin-top:8px;">
+                    <thead>
+                        <tr>
+                            <th>{{ texts.get('throughput_period', '周期') }}</th>
+                            <th>{{ texts.get('throughput_loss_raw_to_saw', '原木→锯解损耗') }}</th>
+                            <th>{{ texts.get('throughput_loss_kiln_in_to_out', '入窑→出窑损耗') }}</th>
+                            <th>{{ texts.get('throughput_loss_out_to_product', '出窑→成品损耗') }}</th>
+                            <th>{{ texts.get('throughput_product_per_mt', '1缅吨原木产成品') }}</th>
+                            <th>{{ texts.get('throughput_raw_for_10m3', '10m³成品需原木') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ texts.get('throughput_period_day', '当日') }}</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_day.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_day.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_day.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(data.throughput.current_day.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_day.raw_mt_for_10_product_m3) }} MT</td>
+                        </tr>
+                        <tr>
+                            <td>{{ texts.get('throughput_period_week', '当周') }}</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_week.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_week.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_week.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(data.throughput.current_week.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_week.raw_mt_for_10_product_m3) }} MT</td>
+                        </tr>
+                        <tr>
+                            <td>{{ texts.get('throughput_period_month', '当月') }}</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_month.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_month.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_month.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(data.throughput.current_month.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(data.throughput.current_month.raw_mt_for_10_product_m3) }} MT</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="layout" style="margin-top:10px;">
+                <div class="card" style="margin:0;background:#fff;">
+                    <strong>{{ texts.get('throughput_trend_daily', '近14日各环节 m³ 趋势') }}</strong>
+                    <canvas id="throughput-trend-canvas" class="mini-canvas" width="560" height="260"></canvas>
+                </div>
+                <div class="card" style="margin:0;background:#fff;">
+                    <strong>{{ texts.get('throughput_compare_chart', '成品m³ 同比/环比') }}</strong>
+                    <canvas id="throughput-compare-canvas" class="mini-canvas" width="560" height="260"></canvas>
+                </div>
             </div>
         </div>
 
@@ -270,6 +428,93 @@
         ctx.fillStyle = ds.color; ctx.fillRect(lx, y-9, 14, 14);
         ctx.fillStyle = '#0f172a'; ctx.fillText(ds.name, lx+20, y+2);
       });
+    })();
+    (function(){
+      const trendCanvas = document.getElementById('throughput-trend-canvas');
+      const cmpCanvas = document.getElementById('throughput-compare-canvas');
+      const trend = {{ data.throughput.trend_daily | tojson }};
+      if(trendCanvas && trend && trend.labels){
+        const ctx = trendCanvas.getContext('2d');
+        const W = trendCanvas.width, H = trendCanvas.height;
+        const pad = {l:42,r:12,t:18,b:34};
+        const labels = trend.labels || [];
+        const series = [
+          {name:'{{ texts.get("throughput_stage_saw", "锯解") }}', key:'saw_m3', color:'#2563eb'},
+          {name:'{{ texts.get("throughput_stage_dip", "药浸") }}', key:'dip_m3', color:'#10b981'},
+          {name:'{{ texts.get("throughput_stage_sort", "拣选") }}', key:'sort_m3', color:'#f59e0b'},
+          {name:'{{ texts.get("throughput_stage_secondary", "二选") }}', key:'secondary_m3', color:'#ef4444'},
+          {name:'{{ texts.get("throughput_stage_product", "成品") }}', key:'product_m3', color:'#6b7280'},
+        ];
+        let vmax = 1;
+        series.forEach(s => ((trend[s.key]||[]).forEach(v => { vmax = Math.max(vmax, Number(v||0)); })));
+        ctx.clearRect(0,0,W,H);
+        ctx.strokeStyle = '#e2e8f0';
+        for(let i=0;i<=4;i++){
+          const y = pad.t + (H-pad.t-pad.b)*i/4;
+          ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke();
+        }
+        ctx.fillStyle='#64748b'; ctx.font='11px Arial';
+        for(let i=0;i<=4;i++){
+          const v = ((4-i)/4)*vmax;
+          const y = pad.t + (H-pad.t-pad.b)*i/4;
+          ctx.fillText(v.toFixed(1), 4, y+3);
+        }
+        const n = Math.max(1, labels.length);
+        const xAt = (i) => pad.l + (W-pad.l-pad.r) * (i/(n-1 || 1));
+        const yAt = (v) => H-pad.b - (Math.max(0, Number(v||0))/vmax)*(H-pad.t-pad.b);
+        series.forEach((s, idx) => {
+          const arr = trend[s.key] || [];
+          ctx.beginPath();
+          arr.forEach((v,i) => { const x=xAt(i), y=yAt(v); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+          ctx.strokeStyle = s.color; ctx.lineWidth = 1.8; ctx.stroke();
+          const ly = 12 + idx*14;
+          ctx.fillStyle = s.color; ctx.fillRect(W-112, ly-8, 10, 10);
+          ctx.fillStyle = '#334155'; ctx.fillText(s.name, W-96, ly);
+        });
+        ctx.fillStyle='#64748b';
+        labels.forEach((lb,i) => { if(i%2===0 || i===labels.length-1){ ctx.fillText(lb, xAt(i)-12, H-10); } });
+      }
+
+      if(cmpCanvas){
+        const cmp = {{ data.throughput.comparison | tojson }};
+        const ctx = cmpCanvas.getContext('2d');
+        const W = cmpCanvas.width, H = cmpCanvas.height;
+        const pad = {l:32,r:18,t:20,b:38};
+        ctx.clearRect(0,0,W,H);
+        const groups = [
+          {k:'day', lb:'{{ texts.get("throughput_period_day", "当日") }}'},
+          {k:'week', lb:'{{ texts.get("throughput_period_week", "当周") }}'},
+          {k:'month', lb:'{{ texts.get("throughput_period_month", "当月") }}'},
+        ];
+        let maxAbs = 5;
+        groups.forEach(g => {
+          const it = cmp[g.k] || {};
+          maxAbs = Math.max(maxAbs, Math.abs(Number(it.mom_pct||0)), Math.abs(Number(it.yoy_pct||0)));
+        });
+        const baseline = pad.t + (H-pad.t-pad.b)/2;
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.beginPath(); ctx.moveTo(pad.l, baseline); ctx.lineTo(W-pad.r, baseline); ctx.stroke();
+        const barW = 22, gap = 14, groupW = barW*2 + gap + 16;
+        groups.forEach((g, idx) => {
+          const cx = pad.l + idx*groupW + 34;
+          const item = cmp[g.k] || {};
+          const vals = [
+            {v: Number(item.mom_pct||0), c:'#2563eb', n:'{{ texts.get("throughput_mom", "环比") }}'},
+            {v: Number(item.yoy_pct||0), c:'#f59e0b', n:'{{ texts.get("throughput_yoy", "同比") }}'},
+          ];
+          vals.forEach((it,j) => {
+            const x = cx + j*(barW+gap);
+            const h = Math.min((H-pad.t-pad.b)/2-6, Math.abs(it.v)/maxAbs*((H-pad.t-pad.b)/2-6));
+            const y = it.v >= 0 ? baseline-h : baseline;
+            ctx.fillStyle = it.c; ctx.fillRect(x,y,barW,h);
+            ctx.fillStyle = '#334155'; ctx.font='11px Arial';
+            ctx.fillText((isFinite(it.v)?it.v.toFixed(1):'--')+'%', x-4, it.v>=0 ? y-4 : y+h+12);
+          });
+          ctx.fillStyle='#475569'; ctx.fillText(g.lb, cx+2, H-12);
+        });
+        ctx.fillStyle='#2563eb'; ctx.fillRect(W-140, 14, 10, 10); ctx.fillStyle='#334155'; ctx.fillText('{{ texts.get("throughput_mom", "环比") }}', W-126, 23);
+        ctx.fillStyle='#f59e0b'; ctx.fillRect(W-80, 14, 10, 10); ctx.fillStyle='#334155'; ctx.fillText('{{ texts.get("throughput_yoy", "同比") }}', W-66, 23);
+      }
     })();
     </script>
 </body>

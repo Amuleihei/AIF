@@ -894,7 +894,8 @@ def register_production_kiln_routes(app, logger=None):
                 {
                     "saw_tray_pool": stock_data["saw_stock"] + saw_trays,
                     "dust_bag_pool": stock_data.get("dust_bag_stock", 0) + dust_bags,
-                    "bark_stock_m3": float(stock_data.get("bark_stock_m3", 0.0)) + bark_m3,
+                    "bark_stock_ks_pool": float(stock_data.get("bark_stock_ks", 0.0)) + float(bark_m3) * float(BARK_PRICE_PER_M3_KS),
+                    "bark_stock_m3": (float(stock_data.get("bark_stock_ks", 0.0)) + float(bark_m3) * float(BARK_PRICE_PER_M3_KS)) / float(BARK_PRICE_PER_M3_KS),
                 }
             )
             _persist_saw_machine_stats(saw_machine_records)
@@ -929,10 +930,11 @@ def register_production_kiln_routes(app, logger=None):
 
             if sell_dust_bags < 0 or sell_bark_ks < 0 or sell_waste_segment_bags < 0:
                 return _redirect_index_result(f"❌ {_t('fill_required')}", error=True)
+            current_bark_ks = float(stock_data.get("bark_stock_ks", 0.0))
             sell_bark_m3 = sell_bark_ks / BARK_PRICE_PER_M3_KS
             if stock_data.get("dust_bag_stock", 0) < sell_dust_bags:
                 return _redirect_index_result(f"❌ {_t('dust_stock_insufficient')}", error=True)
-            if float(stock_data.get("bark_stock_m3", 0.0)) < sell_bark_m3:
+            if current_bark_ks < sell_bark_ks:
                 return _redirect_index_result(f"❌ {_t('bark_stock_insufficient')}", error=True)
             if stock_data.get("waste_segment_bag_stock", 0) < sell_waste_segment_bags:
                 return _redirect_index_result(f"❌ {_t('waste_segment_stock_insufficient')}", error=True)
@@ -950,10 +952,12 @@ def register_production_kiln_routes(app, logger=None):
             session.commit()
             session.close()
 
+            new_bark_ks = current_bark_ks - sell_bark_ks
             update_flow_data(
                 {
                     "dust_bag_pool": stock_data.get("dust_bag_stock", 0) - sell_dust_bags,
-                    "bark_stock_m3": float(stock_data.get("bark_stock_m3", 0.0)) - sell_bark_m3,
+                    "bark_stock_ks_pool": new_bark_ks,
+                    "bark_stock_m3": new_bark_ks / float(BARK_PRICE_PER_M3_KS),
                     "waste_segment_bag_pool": stock_data.get("waste_segment_bag_stock", 0) - sell_waste_segment_bags,
                 }
             )
@@ -998,10 +1002,10 @@ def register_production_kiln_routes(app, logger=None):
                 return _redirect_index_result(f"❌ {_t('fill_required')}", error=True)
 
             stock_data = get_stock_data_with_lang()
-            bark_stock_m3 = float(stock_data.get("bark_stock_m3", 0.0))
+            bark_stock_ks = float(stock_data.get("bark_stock_ks", 0.0))
             delta_m3 = float(bark_sale_delta_ks) / float(BARK_PRICE_PER_M3_KS)
-            new_bark_stock_m3 = bark_stock_m3 - delta_m3
-            if new_bark_stock_m3 < 0:
+            new_bark_stock_ks = bark_stock_ks - bark_sale_delta_ks
+            if new_bark_stock_ks < 0:
                 return _redirect_index_result(f"❌ {_t('bark_stock_insufficient')}", error=True)
 
             session = Session()
@@ -1017,7 +1021,12 @@ def register_production_kiln_routes(app, logger=None):
             session.commit()
             session.close()
 
-            update_flow_data({"bark_stock_m3": new_bark_stock_m3})
+            update_flow_data(
+                {
+                    "bark_stock_ks_pool": new_bark_stock_ks,
+                    "bark_stock_m3": new_bark_stock_ks / float(BARK_PRICE_PER_M3_KS),
+                }
+            )
             audit_admin_action(
                 "adjust_bark_sale",
                 target="byproduct_sale",
@@ -1037,18 +1046,20 @@ def register_production_kiln_routes(app, logger=None):
             dip_cans = _to_int(request.form.get("dip_cans"), 0)
             dip_trays = _to_int(request.form.get("dip_trays"), 0)
             dip_chemicals = _to_float(request.form.get("dip_chemicals"), 0.0)
+            dip_additive_used = _to_float(request.form.get("dip_additive_used"), 0.0)
             dip_chem_inbound = _to_float(request.form.get("dip_chem_inbound"), 0.0)
             dip_additive_inbound = _to_float(request.form.get("dip_additive_inbound"), 0.0)
 
             stock_data = get_stock_data_with_lang()
-            if dip_chemicals < 0 or dip_chem_inbound < 0 or dip_additive_inbound < 0:
+            if dip_chemicals < 0 or dip_additive_used < 0 or dip_chem_inbound < 0 or dip_additive_inbound < 0:
                 return _redirect_index_result(f"❌ {_t('fill_required')}", error=True)
-            # 业务规则：药浸 5 项（罐次/锯托/药品添加/药品入库/添加剂入库）任意一项 > 0 即可提交。
+            # 业务规则：药浸 6 项（罐次/锯托/药品添加/添加剂消耗/药品入库/添加剂入库）任意一项 > 0 即可提交。
             if not any(
                 [
                     dip_cans > 0,
                     dip_trays > 0,
                     dip_chemicals > 0,
+                    dip_additive_used > 0,
                     dip_chem_inbound > 0,
                     dip_additive_inbound > 0,
                 ]
@@ -1060,6 +1071,8 @@ def register_production_kiln_routes(app, logger=None):
             current_additive_kg = float(stock_data.get("dip_additive_kg_stock", 0.0))
             if (current_dip_chem + dip_chem_inbound) < dip_chemicals:
                 return _redirect_index_result(f"❌ {_t('dip_chem_stock_insufficient')}", error=True)
+            if (current_additive_kg + dip_additive_inbound) < dip_additive_used:
+                return _redirect_index_result(f"❌ {_t('dip_additive_stock_insufficient')}", error=True)
 
             if dip_cans > 0 or dip_trays > 0 or dip_chemicals > 0:
                 session = Session()
@@ -1079,7 +1092,7 @@ def register_production_kiln_routes(app, logger=None):
                     "saw_tray_pool": stock_data["saw_stock"] - dip_trays,
                     "dip_tray_pool": stock_data["dip_stock"] + dip_trays,
                     "dip_chem_bag_pool": current_dip_chem + dip_chem_inbound - dip_chemicals,
-                    "dip_additive_kg_pool": current_additive_kg + dip_additive_inbound,
+                    "dip_additive_kg_pool": current_additive_kg + dip_additive_inbound - dip_additive_used,
                 }
             )
             audit_admin_action(
@@ -1087,7 +1100,8 @@ def register_production_kiln_routes(app, logger=None):
                 target="dip_record",
                 detail=(
                     f"cans={dip_cans},trays={dip_trays},chemicals={dip_chemicals:.4f},"
-                    f"chem_in={dip_chem_inbound:.4f},additive_in={dip_additive_inbound:.4f}"
+                    f"additive_used={dip_additive_used:.4f},chem_in={dip_chem_inbound:.4f},"
+                    f"additive_in={dip_additive_inbound:.4f}"
                 ),
             )
 
@@ -1095,17 +1109,20 @@ def register_production_kiln_routes(app, logger=None):
             if lc == "en":
                 result = (
                     f"Dipping saved: runs {dip_cans}, trays {dip_trays}, chemical used {dip_chemicals:.2f}, "
-                    f"chemical inbound +{dip_chem_inbound:.2f} bags, additive inbound +{dip_additive_inbound:.2f} kg"
+                    f"additive used {dip_additive_used:.2f} kg, chemical inbound +{dip_chem_inbound:.2f} bags, "
+                    f"additive inbound +{dip_additive_inbound:.2f} kg"
                 )
             elif lc == "my":
                 result = (
                     f"ဆေးစိမ်မှု အောင်မြင်: ကြိမ် {dip_cans}, ထပ်ခါး {dip_trays}, ဆေးအသုံး {dip_chemicals:.2f}, "
-                    f"ဆေးဝင် +{dip_chem_inbound:.2f} အိတ်, ထည့်ဆေးဝင် +{dip_additive_inbound:.2f} kg"
+                    f"ထည့်ဆေးအသုံး {dip_additive_used:.2f} kg, ဆေးဝင် +{dip_chem_inbound:.2f} အိတ်, "
+                    f"ထည့်ဆေးဝင် +{dip_additive_inbound:.2f} kg"
                 )
             else:
                 result = (
                     f"药浸提交成功：罐次{dip_cans}，锯托{dip_trays}，药品添加{dip_chemicals:.2f}袋，"
-                    f"药品入库+{dip_chem_inbound:.2f}袋，添加剂入库+{dip_additive_inbound:.2f}公斤"
+                    f"添加剂消耗{dip_additive_used:.2f}公斤，药品入库+{dip_chem_inbound:.2f}袋，"
+                    f"添加剂入库+{dip_additive_inbound:.2f}公斤"
                 )
             return _redirect_index_result(result, error=False)
         except Exception as e:
@@ -1334,6 +1351,7 @@ def register_production_kiln_routes(app, logger=None):
                     if total_trays < kilns[kiln_id]["unloaded_count"]:
                         total_trays = kilns[kiln_id]["unloaded_count"]
                     kilns[kiln_id]["unloading_total_trays"] = total_trays
+                    remaining_after = max(0, total_trays - _to_int(kilns[kiln_id].get("unloaded_count"), 0))
                     if kilns[kiln_id]["unloaded_count"] >= total_trays:
                         prev_status = str(kilns[kiln_id].get("status", "") or "")
                         kilns[kiln_id]["status"] = "completed"
@@ -1341,6 +1359,13 @@ def register_production_kiln_routes(app, logger=None):
                             kilns[kiln_id]["status_changed_at"] = int(time.time())
                         elif not kilns[kiln_id].get("status_changed_at"):
                             kilns[kiln_id]["status_changed_at"] = int(time.time())
+                    # 中文注释：当出窑完成且当前托数为0时，自动回到空窑状态。
+                    if remaining_after <= 0:
+                        kilns[kiln_id]["status"] = "empty"
+                        kilns[kiln_id]["status_changed_at"] = int(time.time())
+                        kilns[kiln_id]["trays"] = []
+                        kilns[kiln_id]["unloaded_count"] = 0
+                        kilns[kiln_id]["unloading_total_trays"] = 0
                     _save_kilns_data(kilns)
 
                 flow_data = _read_flow_data()
@@ -1401,9 +1426,9 @@ def register_production_kiln_routes(app, logger=None):
             waste_segment_bags = _to_int(request.form.get("waste_segment_bags"), 0)
 
             stock_data = get_stock_data_with_lang()
-            if secondary_sort_trays <= 0:
+            if secondary_sort_trays <= 0 and waste_segment_bags <= 0:
                 return _redirect_index_result(f"❌ {_t('fill_required')}", error=True)
-            if stock_data["kiln_done_stock"] < secondary_sort_trays:
+            if secondary_sort_trays > 0 and stock_data["kiln_done_stock"] < secondary_sort_trays:
                 return _redirect_index_result(f"❌ {_t('kiln_done_insufficient')}", error=True)
             if waste_segment_bags < 0:
                 return _redirect_index_result(f"❌ {_t('fill_required')}", error=True)
@@ -1414,17 +1439,18 @@ def register_production_kiln_routes(app, logger=None):
             if not isinstance(second_sort_records, list):
                 second_sort_records = []
             second_sort_records = list(second_sort_records)
-            second_sort_records.append(
-                {
-                    "time": datetime.now().isoformat(),
-                    "trays": secondary_sort_trays,
-                    "ok_m3": 0.0,
-                    "ab_m3": 0.0,
-                    "bc_m3": 0.0,
-                    "loss_m3": 0.0,
-                    "spec_summary": {},
-                }
-            )
+            if secondary_sort_trays > 0:
+                second_sort_records.append(
+                    {
+                        "time": datetime.now().isoformat(),
+                        "trays": secondary_sort_trays,
+                        "ok_m3": 0.0,
+                        "ab_m3": 0.0,
+                        "bc_m3": 0.0,
+                        "loss_m3": 0.0,
+                        "spec_summary": {},
+                    }
+                )
             flow_updates = {
                 "kiln_done_tray_pool": stock_data["kiln_done_stock"] - secondary_sort_trays,
                 "waste_segment_bag_pool": stock_data.get("waste_segment_bag_stock", 0) + waste_segment_bags,
@@ -1501,10 +1527,11 @@ def register_production_kiln_routes(app, logger=None):
                     product_id = parts[0].strip()
                     count = _to_int(parts[1].strip(), 0)
                     grade = parts[2].strip().upper()
+                    weight_kg = 0.0
                     if not product_id or count <= 0:
                         raise ValueError("invalid product entry")
                     spec, volume = _infer_spec_and_volume(product_id, count, None)
-                    upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存")
+                    upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存", weight_kg=weight_kg)
                     # 业务口径：一个编号=一件；count 为每件内根数（pcs）。
                     total_product_count += 1
                     total_volume += volume
@@ -1513,12 +1540,13 @@ def register_production_kiln_routes(app, logger=None):
                     spec = parts[1].strip()
                     count = _to_int(parts[2].strip(), 0)
                     grade = parts[3].strip().upper()
+                    weight_kg = _to_float(parts[4].strip(), 0.0) if len(parts) >= 5 else 0.0
                     if not product_id or count <= 0:
                         raise ValueError("invalid product entry")
                     # 用户手输的新规格在此自动加入匹配库（规格-数量）
                     _register_secondary_rule(spec, count)
                     spec, volume = _infer_spec_and_volume(product_id, count, spec)
-                    upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存")
+                    upsert_inventory_product(product_id=product_id, spec=spec, grade=grade, pcs=count, volume=volume, status="库存", weight_kg=weight_kg)
                     # 业务口径：一个编号=一件；count 为每件内根数（pcs）。
                     total_product_count += 1
                     total_volume += volume
@@ -1618,13 +1646,17 @@ def register_production_kiln_routes(app, logger=None):
             trays_in_kiln = sum(_to_int(item.get("count"), 0) for item in trays if isinstance(item, dict))
             stored_total = _to_int(kiln.get("unloading_total_trays"), 0)
             unloaded_count = _to_int(kiln.get("unloaded_count"), 0)
-            # 中文注释：管理员修正的总托数优先展示，确保前后端口径一致。
-            total_trays = stored_total if stored_total > 0 else trays_in_kiln
+            status = str(kiln.get("status", "empty") or "empty")
+            # 中文注释：仅在待出/出窑/完成阶段优先使用修正总托；装窑/烘干阶段实时以窑内托数为准。
+            if status in {"ready", "unloading", "completed"} and stored_total > 0:
+                total_trays = stored_total
+            else:
+                total_trays = trays_in_kiln
             remaining_trays = max(0, total_trays - unloaded_count)
             return jsonify(
                 {
                     "kiln_id": kiln_id,
-                    "status": kiln.get("status", "empty"),
+                    "status": status,
                     "trays": trays,
                     "total_trays": total_trays,
                     "remaining_trays": remaining_trays,
@@ -1633,7 +1665,8 @@ def register_production_kiln_routes(app, logger=None):
                 }
             )
 
-        if not current_user.has_permission("admin"):
+        role = str(getattr(current_user, "role", "") or "").strip().lower()
+        if not (current_user.has_permission("admin") or role in {"stats", "statistics", "finance", "统计"}):
             return jsonify({"error": _t("no_admin_perm")}), 403
 
         data = request.get_json(silent=True) or {}
@@ -1668,21 +1701,97 @@ def register_production_kiln_routes(app, logger=None):
 
         kilns = _load_kilns_data()
         kiln = kilns.get(kiln_id, {})
+        old_status = str(kiln.get("status", "empty") or "empty")
+        old_trays = kiln.get("trays", []) if isinstance(kiln.get("trays"), list) else []
+        returned_to_pending = 0
+
+        # 中文注释：装窑中手动删除窑内托盘时，删除量自动回流到“待入窑”池，避免托盘凭空丢失。
+        if old_status == "loading":
+            new_count_by_id = {}
+            for item in normalized:
+                tid = str(item.get("id", "")).strip()
+                if not tid:
+                    continue
+                new_count_by_id[tid] = new_count_by_id.get(tid, 0) + max(0, _to_int(item.get("count"), 0))
+
+            back_items = []
+            for item in old_trays:
+                if not isinstance(item, dict):
+                    continue
+                tid = str(item.get("id", "")).strip()
+                if not tid:
+                    continue
+                old_cnt = max(0, _to_int(item.get("count"), 0))
+                keep_cnt = max(0, _to_int(new_count_by_id.get(tid), 0))
+                back_cnt = max(0, old_cnt - keep_cnt)
+                if back_cnt <= 0:
+                    continue
+                spec_text = str(item.get("spec", "") or "").strip()
+                for _ in range(back_cnt):
+                    back_items.append({"id": tid, "spec": spec_text})
+
+            if back_items:
+                flow = _read_flow_data()
+                selected = flow.get("selected_tray_details", [])
+                if not isinstance(selected, list):
+                    selected = []
+                used_ids = {
+                    str(x.get("id", "")).strip()
+                    for x in selected
+                    if isinstance(x, dict) and str(x.get("id", "")).strip()
+                }
+
+                def _alloc_id(base_id: str) -> str:
+                    base = str(base_id or "").strip() or "TRAY"
+                    if base not in used_ids:
+                        used_ids.add(base)
+                        return base
+                    n = 1
+                    while True:
+                        cand = f"{base}-R{n}"
+                        if cand not in used_ids:
+                            used_ids.add(cand)
+                            return cand
+                        n += 1
+
+                for bi in back_items:
+                    new_id = _alloc_id(bi.get("id", ""))
+                    spec_text = str(bi.get("spec", "") or "").strip()
+                    selected.append(
+                        {
+                            "id": new_id,
+                            "spec": spec_text,
+                            "specs": ([{"spec": spec_text, "qty": 1}] if spec_text else []),
+                            "count": 1,
+                            "volume": 0.1,
+                        }
+                    )
+                flow["selected_tray_details"] = selected
+                flow["selected_tray_pool"] = len(selected)
+                _save_flow_data(flow)
+                returned_to_pending = len(back_items)
+
         kiln["trays"] = normalized
         if kiln.get("status") == "empty" and normalized:
             kiln["status"] = "loading"
         if _to_int(kiln.get("unloaded_count"), 0) > total:
             kiln["unloaded_count"] = total
         kiln["unloading_total_trays"] = total
+        # 中文注释：手工编辑后若为完成态且当前托数为0，自动置为空窑。
+        if str(kiln.get("status", "") or "") == "completed" and total <= 0:
+            kiln["status"] = "empty"
+            kiln["status_changed_at"] = int(time.time())
+            kiln["unloaded_count"] = 0
+            kiln["unloading_total_trays"] = 0
         kilns[kiln_id] = kiln
         _save_kilns_data(kilns)
         audit_admin_action(
             "edit_kiln_trays",
             target=f"kiln_{kiln_id}",
-            detail=f"total_trays={total}, rows={len(normalized)}",
+            detail=f"total_trays={total}, rows={len(normalized)}, returned_to_pending={returned_to_pending}",
         )
 
-        return jsonify({"success": True, "total_trays": total})
+        return jsonify({"success": True, "total_trays": total, "returned_to_pending": returned_to_pending})
 
     @app.route("/api/pending_kiln_trays", methods=["GET", "POST"])
     @login_required

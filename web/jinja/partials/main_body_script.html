@@ -116,6 +116,7 @@
         const OVERVIEW_RADAR = {{ (overview_radar or {}) | tojson }};
         let DAILY_ENTRY_STATUS = { loaded: false, missing_sort: false, missing_secondary_sort: false };
         const IS_ADMIN = {{ 'true' if current_user.has_permission('admin') else 'false' }};
+        const CAN_EDIT_KILN_TRAYS = {{ 'true' if (current_user.has_permission('admin') or ((current_user.role or '')|lower in ['stats', 'statistics', 'finance', '统计'])) else 'false' }};
         const CAN_EXPORT_LOG = {{ 'true' if current_user.has_permission('export') else 'false' }};
         let currentKilnId = null;
         let trayPickerState = { mode: '', kilnId: '', selected: new Set(), dragActive: false, dragValue: true };
@@ -1064,8 +1065,11 @@
 
         function beforeSubmitSecondarySortForm() {
             const secondaryInput = document.getElementById('secondary_sort_trays');
-            const hasValue = !!((secondaryInput && secondaryInput.value) || '').trim();
-            if (!hasValue) {
+            const wasteInput = document.getElementById('secondary_waste_segment_bags');
+            const hasTrayValue = !!((secondaryInput && secondaryInput.value) || '').trim();
+            const wasteVal = Number((wasteInput && wasteInput.value) || 0);
+            const hasWasteValue = Number.isFinite(wasteVal) && wasteVal > 0;
+            if (!hasTrayValue && !hasWasteValue) {
                 highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
                 return false;
             }
@@ -1086,6 +1090,7 @@
         function refreshFlowMissingReminders() {
             const sortInput = document.getElementById('sort_trays_input');
             const secondaryInput = document.getElementById('secondary_sort_trays');
+            const wasteInput = document.getElementById('secondary_waste_segment_bags');
             const hour = (new Date()).getHours();
             if (hour < 16) {
                 clearMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
@@ -1094,6 +1099,8 @@
             }
             const sortVal = parseInt((sortInput && sortInput.value) || '0', 10) || 0;
             const secondaryHasValue = !!((secondaryInput && secondaryInput.value) || '').trim();
+            const secondaryWaste = Number((wasteInput && wasteInput.value) || 0);
+            const secondaryDone = secondaryHasValue || (Number.isFinite(secondaryWaste) && secondaryWaste > 0);
 
             let sortMissing = CURRENT_DIP_STOCK > 0;
             let secondaryMissing = CURRENT_KILN_DONE_STOCK > 0;
@@ -1108,7 +1115,7 @@
                 clearMissingInput(sortInput, document.getElementById('sort-missing-bubble'));
             }
 
-            if (secondaryMissing && !secondaryHasValue) {
+            if (secondaryMissing && !secondaryDone) {
                 highlightMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
             } else {
                 clearMissingInput(secondaryInput, document.getElementById('secondary-missing-bubble'));
@@ -1337,7 +1344,7 @@
             } else if (confirmHidden) {
                 confirmHidden.value = '0';
             }
-            hidden.value = entries.map(e => `${e.id}#${e.spec}#${e.pcs}#${e.grade}`).join(', ');
+            hidden.value = entries.map(e => `${e.id}#${e.spec}#${e.pcs}#${e.grade}#${Number(e.kg || 0).toFixed(2)}`).join(', ');
             form.submit();
         }
 
@@ -1517,7 +1524,7 @@
             document.getElementById('secondary-product-modal').style.display = 'none';
         }
 
-        function addSecondaryProductRow(pid = '', pcs = 1, grade = 'AB') {
+        function addSecondaryProductRow(pid = '', pcs = 1, grade = 'AB', kg = 0) {
             const body = document.getElementById('secondary-product-body');
             const tr = document.createElement('tr');
             const listId = `sp-spec-list-${++secondarySpecListSeq}`;
@@ -1538,6 +1545,7 @@
                     <div class="sp-spec-popup" style="display:none; position:absolute; top:32px; left:0; z-index:30; min-width:168px; max-width:260px; max-height:180px; overflow:auto; background:#fff; color:#0f172a; border:1px solid #d1d5db; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12);"></div>
                 </td>
                 <td><input type="text" class="sp-m3" readonly style="width:86px; height:28px; padding:4px 6px; font-size:12px; background:#f8f9fa;"></td>
+                <td><input type="number" class="sp-kg" min="0" step="0.01" value="${Number(kg) > 0 ? Number(kg).toFixed(2) : ''}" placeholder="0.00" style="height:28px; padding:4px 6px; font-size:12px; width:96px;"></td>
                 <td class="sp-actions" style="width:140px;">
                     <button type="button" class="btn-inline" onclick="saveSecondaryRow(this)" style="padding:3px 10px; background:#28a745; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.save_row_btn }}</button>
                     <button type="button" class="btn-inline" onclick="this.closest('tr').remove()" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
@@ -1677,6 +1685,7 @@
             const pcs = Number(tr.querySelector('.sp-pcs').value || 0);
             const grade = (tr.querySelector('.sp-grade').value || 'AB').trim().toUpperCase();
             const spec = (tr.querySelector('.sp-spec').value || '').trim();
+            const kg = Number(tr.querySelector('.sp-kg').value || 0);
             if (!pid || !pcs || pcs <= 0 || !spec) {
                 alert('{{ texts.invalid_product_entry_msg }}');
                 return;
@@ -1692,7 +1701,7 @@
                 return;
             }
             mergeSecondaryRules({ [ensured.spec || info.spec]: [pcs] });
-            submitSecondaryProducts([{ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3 }]);
+            submitSecondaryProducts([{ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3, kg: Math.max(0, kg) }]);
         }
 
         async function saveSecondaryAllRows() {
@@ -1704,6 +1713,7 @@
                 const pcs = Number(tr.querySelector('.sp-pcs').value || 0);
                 const grade = (tr.querySelector('.sp-grade').value || 'AB').trim().toUpperCase();
                 const spec = (tr.querySelector('.sp-spec').value || '').trim();
+                const kg = Number(tr.querySelector('.sp-kg').value || 0);
                 if (!pid || !pcs || pcs <= 0 || !spec) continue;
                 const info = calcSpecInfo(spec, pcs);
                 if (!info) continue;
@@ -1713,7 +1723,7 @@
                     return;
                 }
                 mergeSecondaryRules({ [ensured.spec || info.spec]: [pcs] });
-                entries.push({ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3 });
+                entries.push({ id: pid, pcs: pcs, grade: grade, spec: info.spec, m3: info.m3, kg: Math.max(0, kg) });
                 added += 1;
             }
             if (!added) {
@@ -1852,9 +1862,12 @@
             body.innerHTML = '';
             rows.forEach(row => {
                 const tr = document.createElement('tr');
+                const productId = String(row['product_id'] || row['编号'] || '');
                 const deleteCell = IS_ADMIN
-                    ? `<td class="sp-actions" style="width:84px;">
-                            <button type="button" class="btn-inline" onclick="deleteFinishedInventoryRow('${row['product_id']}')" style="padding:3px 10px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.delete }}</button>
+                    ? `<td class="sp-actions" style="width:180px; white-space:nowrap;">
+                            <button type="button" class="btn-inline fi-edit-btn" onclick="enableFinishedInventoryEdit(this)" style="padding:3px 8px; background:#0d6efd; color:#fff; border:none; border-radius:4px; font-size:12px;">{{ texts.edit_btn }}</button>
+                            <button type="button" class="btn-inline fi-save-btn" onclick="saveFinishedInventoryRow(this, '${productId}')" style="padding:3px 8px; background:#28a745; color:#fff; border:none; border-radius:4px; font-size:12px; margin-left:4px;" disabled>{{ texts.save_row_btn }}</button>
+                            <button type="button" class="btn-inline" onclick="deleteFinishedInventoryRow('${productId}')" style="padding:3px 8px; background:#dc3545; color:#fff; border:none; border-radius:4px; font-size:12px; margin-left:4px;">{{ texts.delete }}</button>
                        </td>`
                     : '';
                 tr.innerHTML = `
@@ -1862,12 +1875,12 @@
                     <td>${row['D'] || ''}</td>
                     <td>${row['W'] || ''}</td>
                     <td>${row['L'] || ''}</td>
-                    <td>${row['数量'] || 0}</td>
+                    <td><input type="number" class="fi-pcs" min="1" step="1" value="${Number(row['数量'] || 0)}" style="width:80px; height:28px; padding:4px 6px; font-size:12px;" disabled></td>
                     <td>${Number(row['m³'] || 0).toFixed(4)}</td>
-                    <td>${row['重量(kg)'] || ''}</td>
-                    <td>${row['等级'] || ''}</td>
+                    <td><input type="number" class="fi-kg" min="0" step="0.01" value="${Number(row['重量(kg)'] || 0) > 0 ? Number(row['重量(kg)']).toFixed(2) : ''}" placeholder="0.00" style="width:96px; height:28px; padding:4px 6px; font-size:12px;" disabled></td>
+                    <td><input type="text" class="fi-grade" value="${row['等级'] || ''}" style="width:66px; height:28px; padding:4px 6px; font-size:12px;" disabled></td>
                     <td>库存</td>
-                    <td>${row['规格'] || ''}</td>
+                    <td><input type="text" class="fi-spec" value="${row['规格'] || ''}" style="width:170px; height:28px; padding:4px 6px; font-size:12px;" disabled></td>
                     ${deleteCell}
                 `;
                 body.appendChild(tr);
@@ -2016,6 +2029,48 @@
 
         function closeFinishedInventoryModal() {
             document.getElementById('finished-inventory-modal').style.display = 'none';
+        }
+
+        function enableFinishedInventoryEdit(btn) {
+            if (!IS_ADMIN || !btn) return;
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            tr.querySelectorAll('.fi-pcs, .fi-kg, .fi-grade, .fi-spec').forEach(el => {
+                el.disabled = false;
+            });
+            const saveBtn = tr.querySelector('.fi-save-btn');
+            if (saveBtn) saveBtn.disabled = false;
+        }
+
+        function saveFinishedInventoryRow(btn, productId) {
+            if (!IS_ADMIN || !btn || !productId) return;
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            const pcs = Number((tr.querySelector('.fi-pcs') || {}).value || 0);
+            const kg = Number((tr.querySelector('.fi-kg') || {}).value || 0);
+            const grade = String((tr.querySelector('.fi-grade') || {}).value || '').trim().toUpperCase();
+            const spec = String((tr.querySelector('.fi-spec') || {}).value || '').trim();
+            if (!spec || !Number.isFinite(pcs) || pcs <= 0 || !Number.isFinite(kg) || kg < 0) {
+                alert('{{ texts.invalid_product_entry_msg }}');
+                return;
+            }
+            fetch('/api/finished_inventory/' + encodeURIComponent(productId) + '?lang={{ lang }}', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pcs: Math.round(pcs), weight_kg: kg, grade: grade || 'AB', spec })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error((data && data.error) || '{{ texts.finished_inventory_save_failed }}');
+                const updated = data && data.row ? data.row : null;
+                if (!updated) throw new Error('{{ texts.finished_inventory_save_failed }}');
+                finishedInventoryRows = finishedInventoryRows.map(row => {
+                    if ((row['product_id'] || row['编号']) !== productId) return row;
+                    return Object.assign({}, row, updated);
+                });
+                applyFinishedInventoryFilters();
+            })
+            .catch(err => alert((err && err.message) || '{{ texts.finished_inventory_save_failed }}'));
         }
 
         function updateShipmentSelectedCount() {
@@ -2328,6 +2383,22 @@
             window.location.href = `/export/report/daily?lang={{ lang }}&date=${date}`;
         }
 
+        function resendDailyOnceLinkFromModal() {
+            if (!IS_ADMIN) return;
+            const date = (document.getElementById('daily-report-date').value || _todayIsoDate());
+            fetch(`/admin/report/daily/once/resend?lang={{ lang }}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date })
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error((data && data.error) || '{{ texts.resend_daily_once_failed }}');
+                alert((data && data.result) || '{{ texts.resend_daily_once_sent }}');
+            })
+            .catch(err => alert(err.message || '{{ texts.resend_daily_once_failed }}'));
+        }
+
         function loadDailyReportData() {
             const date = (document.getElementById('daily-report-date').value || _todayIsoDate());
             fetch(`/api/report/daily?lang={{ lang }}&date=${encodeURIComponent(date)}`)
@@ -2406,9 +2477,9 @@
         function addKilnTrayRow(id = '', spec = '', count = 1) {
             const body = document.getElementById('kiln-tray-body');
             const tr = document.createElement('tr');
-            const readonlyAttr = IS_ADMIN ? '' : 'readonly';
-            const disabledAttr = IS_ADMIN ? '' : 'disabled';
-            const actionCell = IS_ADMIN
+            const readonlyAttr = CAN_EDIT_KILN_TRAYS ? '' : 'readonly';
+            const disabledAttr = CAN_EDIT_KILN_TRAYS ? '' : 'disabled';
+            const actionCell = CAN_EDIT_KILN_TRAYS
                 ? `<td><button type="button" onclick="this.closest('tr').remove()">{{ texts.delete }}</button></td>`
                 : `<td></td>`;
             tr.innerHTML = `
@@ -2421,7 +2492,7 @@
         }
 
         function saveKilnTrays() {
-            if (!IS_ADMIN) {
+            if (!CAN_EDIT_KILN_TRAYS) {
                 alert('{{ texts.no_admin_perm }}');
                 return;
             }
@@ -2441,6 +2512,11 @@
             .then(r => r.json().then(data => ({ ok: r.ok, data })))
             .then(({ok, data}) => {
                 if (!ok) throw new Error(data.error || '{{ texts.save_kiln_trays_failed }}');
+                const returned = Number((data || {}).returned_to_pending || 0);
+                if (Number.isFinite(returned) && returned > 0) {
+                    const msgTpl = '{{ texts.kiln_trays_returned_to_pending_msg }}';
+                    alert(msgTpl.replace('{count}', String(returned)));
+                }
                 closeKilnTrayModal();
                 storeScrollPosition();
                 location.reload();
@@ -2472,7 +2548,7 @@
                     addSecondaryProductRow();
                     focusLastModalInput('#secondary-product-body', '.sp-id');
                     handled = true;
-                } else if (modal.id === 'kiln-tray-modal' && IS_ADMIN) {
+                } else if (modal.id === 'kiln-tray-modal' && CAN_EDIT_KILN_TRAYS) {
                     addKilnTrayRow();
                     focusLastModalInput('#kiln-tray-body', '.kt-id');
                     handled = true;
@@ -2525,6 +2601,11 @@
         if (secondarySortInputEl) {
             secondarySortInputEl.addEventListener('input', refreshFlowMissingReminders);
             secondarySortInputEl.addEventListener('blur', refreshFlowMissingReminders);
+        }
+        const secondaryWasteInputEl = document.getElementById('secondary_waste_segment_bags');
+        if (secondaryWasteInputEl) {
+            secondaryWasteInputEl.addEventListener('input', refreshFlowMissingReminders);
+            secondaryWasteInputEl.addEventListener('blur', refreshFlowMissingReminders);
         }
         refreshFlowMissingReminders();
         refreshEntryReminderStrip();

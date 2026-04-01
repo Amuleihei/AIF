@@ -12,11 +12,19 @@ from web.route_support import (
     send_file,
     url_for,
 )
+from flask import make_response
+import hashlib
+import json
+import os
+from urllib import request as urllib_request
 from web.templates_report import DAILY_REPORT_TEMPLATE, BOSS_DAILY_REPORT_TEMPLATE
 from web.utils import get_lang
 from web.services.daily_report_service import build_daily_report
+from web.services.daily_once_link_service import verify_daily_temp_token, issue_daily_once_token, build_daily_once_link
 from web.services.period_report_service import get_report, rebuild_period_report
 from web.i18n import LANGUAGES
+from tg_bot.config import get_bot_token
+from web.models import Session, TgSetting, TgUserRole
 
 
 def _period_texts(lang: str) -> dict:
@@ -225,6 +233,83 @@ def _can_view_report() -> bool:
     )
 
 
+def _normalize_lang_code(raw: str) -> str:
+    text = str(raw or "").strip().lower()
+    if text in ("zh", "en", "my"):
+        return text
+    return "zh"
+
+
+def _collect_tg_admin_chat_ids(session) -> list[str]:
+    ids = {
+        str(r.user_id).strip()
+        for r in session.query(TgUserRole).all()
+        if str(getattr(r, "role", "") or "") in ("管理员", "老板", "admin", "boss") and str(getattr(r, "user_id", "") or "").strip()
+    }
+    fallback = str(os.getenv("BOT_CHAT_ID", "") or "").strip()
+    if fallback:
+        ids.add(fallback)
+    return sorted(ids)
+
+
+def _get_tg_setting_value(session, key: str, default: str = "") -> str:
+    row = session.query(TgSetting).filter_by(key=str(key)).first()
+    if not row:
+        return str(default or "")
+    return str(row.value or "")
+
+
+def _daily_once_web_base_url(session) -> str:
+    env_url = str(os.getenv("AIF_WEB_BASE_URL", "") or "").strip()
+    if env_url:
+        return env_url.rstrip("/")
+    cfg_url = str(_get_tg_setting_value(session, "web_base_url", "") or "").strip()
+    return cfg_url.rstrip("/") if cfg_url else ""
+
+
+def _tg_user_lang(session, uid: str) -> str:
+    try:
+        raw = _get_tg_setting_value(session, "tg_system_cfg", "{}")
+        cfg = json.loads(raw) if raw else {}
+        policy = (cfg or {}).get("lang_policy", {}) if isinstance(cfg, dict) else {}
+        by_user = policy.get("by_user", {}) if isinstance(policy, dict) else {}
+        if isinstance(by_user, dict):
+            got = by_user.get(str(uid), "")
+            if got:
+                return _normalize_lang_code(got)
+        if isinstance(policy, dict):
+            return _normalize_lang_code(policy.get("default", "zh"))
+    except Exception:
+        pass
+    return "zh"
+
+
+def _daily_once_text_for_lang(lang: str, day: str, link: str) -> str:
+    if lang == "my":
+        return "\n".join(
+            [
+                f"📘 {day} နေ့စဉ်အစီရင်ခံစာ (တစ်ကြိမ်သုံးလင့်ခ်)",
+                "⚠️ ဤလင့်ခ်သည် တစ်ကြိမ်သာအသုံးပြုနိုင်ပြီး ဒုတိယအကြိမ်ဝင်ရန် Login လိုအပ်ပါသည်။",
+                link,
+            ]
+        )
+    if lang == "en":
+        return "\n".join(
+            [
+                f"📘 Daily Report {day} (One-time Link)",
+                "⚠️ This link can be opened once only. Second access requires login.",
+                link,
+            ]
+        )
+    return "\n".join(
+        [
+            f"📘 {day} 日报（一次性链接）",
+            "⚠️ 此链接为一次性链接，二次访问需登录。",
+            link,
+        ]
+    )
+
+
 def register_reporting_routes(app):
     @app.route("/api/report/daily")
     @login_required
@@ -252,6 +337,105 @@ def register_reporting_routes(app):
             report=report,
             lang=lang,
             texts=texts,
+            one_time_access=False,
+        )
+
+    @app.route("/report/daily/once")
+    def report_daily_once_page():
+        token = request.args.get("token", "")
+        lang = (request.args.get("lang", "") or "zh").strip() or "zh"
+        checked = verify_daily_temp_token(token)
+        day = str(checked.get("day") or request.args.get("date", "") or "")
+        if not bool(checked.get("ok")):
+            return redirect(url_for("report_daily_page", date=day, lang=lang))
+
+        # 同一设备/浏览器一次性：命中标记后回到登录查看链路。
+        digest = hashlib.sha1(str(token or "").encode("utf-8")).hexdigest()[:20]
+        cookie_key = f"daily_once_seen_{digest}"
+        if str(request.cookies.get(cookie_key, "") or "") == "1":
+            return redirect(url_for("report_daily_page", date=day, lang=lang))
+
+        report = build_daily_report(day, lang=lang)
+        texts = LANGUAGES.get(lang, LANGUAGES["zh"])
+        html = render_template_string(
+            DAILY_REPORT_TEMPLATE,
+            report=report,
+            lang=lang,
+            texts=texts,
+            one_time_access=True,
+        )
+        resp = make_response(html)
+        now = datetime.now()
+        end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        ttl = max(60, int((end - now).total_seconds()))
+        resp.set_cookie(cookie_key, "1", max_age=ttl, httponly=True, samesite="Lax")
+        return resp
+
+    @app.route("/admin/report/daily/once/resend", methods=["POST"])
+    @login_required
+    def admin_resend_daily_once_link():
+        lang = get_lang()
+        texts = LANGUAGES.get(lang, LANGUAGES["zh"])
+        if not current_user.has_permission("admin"):
+            return jsonify({"ok": False, "error": texts.get("no_admin_perm", "没有管理员权限")}), 403
+
+        day = str((request.json or {}).get("date", "") or request.form.get("date", "") or "").strip()
+        if not day:
+            day = datetime.now().strftime("%Y-%m-%d")
+
+        try:
+            token = get_bot_token()
+        except Exception:
+            token = ""
+        if not token:
+            return jsonify({"ok": False, "error": texts.get("tg_not_configured", "BOT_TOKEN 未配置")}), 500
+
+        session = Session()
+        sent = 0
+        try:
+            base_url = _daily_once_web_base_url(session)
+            if not base_url:
+                return jsonify({"ok": False, "error": texts.get("web_base_url_missing", "未配置外网地址")}), 500
+
+            chat_ids = _collect_tg_admin_chat_ids(session)
+            if not chat_ids:
+                return jsonify({"ok": False, "error": texts.get("tg_targets_empty", "未找到TG接收人")}), 400
+
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            headers = {"Content-Type": "application/json"}
+            for uid in chat_ids:
+                try:
+                    tok = issue_daily_once_token(str(uid), day)
+                    link = build_daily_once_link(base_url, tok, lang=_tg_user_lang(session, str(uid)))
+                    if not link:
+                        continue
+                    payload = {
+                        "chat_id": str(uid),
+                        "text": _daily_once_text_for_lang(_tg_user_lang(session, str(uid)), day, link),
+                        "disable_web_page_preview": True,
+                    }
+                    req = urllib_request.Request(
+                        url,
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers=headers,
+                        method="POST",
+                    )
+                    urllib_request.urlopen(req, timeout=6).read()
+                    sent += 1
+                except Exception:
+                    continue
+        finally:
+            session.close()
+
+        if sent <= 0:
+            return jsonify({"ok": False, "error": texts.get("resend_daily_once_failed", "重发失败")}), 500
+        return jsonify(
+            {
+                "ok": True,
+                "result": texts.get("resend_daily_once_sent", "已重发 TG 临时日报链接") + f" ({day})",
+                "sent": sent,
+                "date": day,
+            }
         )
 
     @app.route("/export/report/daily")

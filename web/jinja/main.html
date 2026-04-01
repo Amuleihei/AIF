@@ -229,6 +229,10 @@
                         <label>{{ texts.dip_chemicals }}</label>
                         <input type="number" name="dip_chemicals" step="0.01" min="0" placeholder="{{ texts.placeholder_bag }}"> {{ texts.unit_bag }}
                     </div>
+                    <div class="form-group">
+                        <label>{{ texts.dip_additive_used }}</label>
+                        <input type="number" name="dip_additive_used" step="0.01" min="0" placeholder="{{ texts.unit_kg }}"> {{ texts.unit_kg }}
+                    </div>
                     <div style="margin:8px 0 6px; border-top:1px dashed #d1d5db; padding-top:6px; color:#6b7280; font-size:12px;">
                         {{ texts.dip_inbound_split }}
                     </div>
@@ -318,12 +322,12 @@
             <form method="POST" action="/submit_secondary_sort?lang={{ lang }}" onsubmit="return beforeSubmitSecondarySortForm()">
                 <div class="form-group">
                     <label>{{ texts.secondary_trays }}</label>
-                    <input type="text" id="secondary_sort_trays" name="secondary_sort_trays" placeholder="{{ texts.placeholder_secondary_ids }}" required>
+                    <input type="text" id="secondary_sort_trays" name="secondary_sort_trays" placeholder="{{ texts.placeholder_secondary_ids }}">
                     <div id="secondary-missing-bubble" class="field-reminder-bubble">{{ texts.secondary_sort_missing_bubble }}</div>
                 </div>
                 <div class="form-group">
                     <label>{{ texts.secondary_waste_segment_output }}</label>
-                    <input type="number" name="waste_segment_bags" min="0" placeholder="{{ texts.placeholder_bag }}" value="0" required> {{ texts.unit_bag }}
+                    <input type="number" id="secondary_waste_segment_bags" name="waste_segment_bags" min="0" placeholder="{{ texts.placeholder_bag }}" value="0"> {{ texts.unit_bag }}
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <button type="button" onclick="openSecondaryProductModal()">{{ texts.add_product_btn }}</button>
@@ -446,7 +450,7 @@
                     <tbody id="kiln-tray-body"></tbody>
                 </table>
                 <div style="display:flex; gap:8px;">
-                    {% if current_user.has_permission('admin') %}
+                    {% if current_user.has_permission('admin') or ((current_user.role or '')|lower in ['stats', 'statistics', 'finance', '统计']) %}
                     <button type="button" onclick="addKilnTrayRow()">{{ texts.add_row_btn }}</button>
                     <button type="button" onclick="saveKilnTrays()">{{ texts.save_changes_btn }}</button>
                     {% endif %}
@@ -534,6 +538,7 @@
                             <th>{{ texts.grade_label }}</th>
                             <th>{{ texts.spec_col }}</th>
                             <th>m³</th>
+                            <th>{{ texts.weight_label }}</th>
                             <th style="width:140px;">{{ texts.actions }}</th>
                         </tr>
                     </thead>
@@ -563,7 +568,7 @@
                             <th>{{ texts.status_label }}</th>
                             <th>{{ texts.spec_col }}</th>
                             {% if current_user.has_permission('admin') %}
-                            <th style="width:84px;">{{ texts.actions }}</th>
+                            <th style="width:180px;">{{ texts.actions }}</th>
                             {% endif %}
                         </tr>
                         <tr>
@@ -682,12 +687,15 @@
             <div class="modal-box">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
                     <h3 style="margin:0;">{{ texts.daily_report_title }}</h3>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <label>{{ texts.report_date_label }}</label>
-                        <input type="date" id="daily-report-date" style="padding:6px; border:1px solid #ddd; border-radius:4px;">
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap; white-space:nowrap;">
+                        <label style="width:auto; margin:0;">{{ texts.report_date_label }}</label>
+                        <input type="date" id="daily-report-date" style="width:150px; padding:6px; border:1px solid #ddd; border-radius:4px;">
                         <button type="button" onclick="loadDailyReportData()">{{ texts.query_btn }}</button>
                         {% if current_user.has_permission('export') %}
                         <button type="button" onclick="exportDailyReportFromModal()" style="background:#0d6efd;">{{ texts.export_daily_report }}</button>
+                        {% endif %}
+                        {% if current_user.has_permission('admin') %}
+                        <button type="button" onclick="resendDailyOnceLinkFromModal()" style="background:#fd7e14;">{{ texts.resend_daily_once_btn }}</button>
                         {% endif %}
                         <button type="button" onclick="closeDailyReportModal()" style="background:#6c757d;">{{ texts.close_btn }}</button>
                     </div>

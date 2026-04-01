@@ -3,6 +3,8 @@ import os
 import sys
 import time
 from datetime import datetime
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 # =====================================================
 # 路径初始化
@@ -57,6 +59,7 @@ from modules.i18n.translate_engine import translate_from_cn, translate_to_cn
 from modules.i18n.shortcut_engine import shortcut_to_cn
 from web.models import Session, TgSetting, TgPendingUser
 from web.services.entry_reminder_service import get_daily_missing_entry_status
+from web.services.daily_once_link_service import issue_daily_once_token, build_daily_once_link
 from modules.report.report_engine import handle_report
 from modules.report.daily_report_engine import handle_daily_report
 from modules.report.system_report import handle_system_report
@@ -72,6 +75,9 @@ os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 TG_SYSTEM_KEY = "tg_system_cfg"
 TG_PENDING_KEY = "tg_pending_users"
 TG_ENTRY_REMINDER_LAST_DAY_KEY = "entry_reminder_last_sent_day"
+TG_DAILY_ONCE_LAST_DAY_KEY = "daily_once_report_last_sent_day"
+TG_CF_TUNNEL_STATE_KEY = "cf_tunnel_state"
+TG_CF_TUNNEL_LAST_CHANGE_KEY = "cf_tunnel_last_change_at"
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -493,6 +499,186 @@ async def scheduled_entry_reminder(context: ContextTypes.DEFAULT_TYPE):
             _set_tg_setting_value(TG_ENTRY_REMINDER_LAST_DAY_KEY, day)
     except Exception:
         logging.exception("scheduled_entry_reminder failed")
+
+
+def _daily_once_target_uids() -> list[str]:
+    out = [str(uid) for uid in get_admin_ids()]
+    return [x for x in out if str(x).strip()]
+
+
+def _daily_once_web_base_url() -> str:
+    env_url = str(os.getenv("AIF_WEB_BASE_URL", "") or "").strip()
+    if env_url:
+        return env_url.rstrip("/")
+    cfg_url = str(_get_tg_setting_value("web_base_url", "") or "").strip()
+    return cfg_url.rstrip("/") if cfg_url else ""
+
+
+def _daily_once_text_for_uid(uid: str, day: str, link: str) -> str:
+    lang = get_user_lang(uid)
+    if lang == "my":
+        return "\n".join(
+            [
+                f"📘 {day} နေ့စဉ်အစီရင်ခံစာ (တစ်ကြိမ်သုံးလင့်ခ်)",
+                "⚠️ ဤလင့်ခ်သည် တစ်ကြိမ်သာအသုံးပြုနိုင်ပြီး ဒုတိယအကြိမ်ဝင်ရန် Login လိုအပ်ပါသည်။",
+                link,
+            ]
+        )
+    if lang == "en":
+        return "\n".join(
+            [
+                f"📘 Daily Report {day} (One-time Link)",
+                "⚠️ This link can be opened once only. Second access requires login.",
+                link,
+            ]
+        )
+    return "\n".join(
+        [
+            f"📘 {day} 日报（一次性链接）",
+            "⚠️ 此链接为一次性链接，二次访问需登录。",
+            link,
+        ]
+    )
+
+
+async def scheduled_daily_once_report_link(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        now = datetime.now()
+        if now.hour < 18 or (now.hour == 18 and now.minute < 30):
+            return
+        day = now.strftime("%Y-%m-%d")
+        if _get_tg_setting_value(TG_DAILY_ONCE_LAST_DAY_KEY, "") == day:
+            return
+
+        base_url = _daily_once_web_base_url()
+        if not base_url:
+            logging.warning("daily_once_report skipped: empty AIF_WEB_BASE_URL/web_base_url")
+            return
+
+        sent_ok = False
+        for uid in _daily_once_target_uids():
+            try:
+                token = issue_daily_once_token(uid, day)
+                link = build_daily_once_link(base_url, token, lang=get_user_lang(uid))
+                if not link:
+                    continue
+                await context.bot.send_message(chat_id=str(uid), text=_daily_once_text_for_uid(str(uid), day, link))
+                sent_ok = True
+            except Exception:
+                logging.exception(f"daily_once_report send failed: {uid}")
+
+        if sent_ok:
+            _set_tg_setting_value(TG_DAILY_ONCE_LAST_DAY_KEY, day)
+    except Exception:
+        logging.exception("scheduled_daily_once_report_link failed")
+
+
+def _cloudflared_ha_connections() -> tuple[bool, int, str]:
+    url = "http://127.0.0.1:20241/metrics"
+    try:
+        with urllib_request.urlopen(url, timeout=3) as resp:
+            payload = resp.read().decode("utf-8", errors="ignore")
+    except urllib_error.URLError as e:
+        return False, 0, f"metrics_unreachable:{e.reason}"
+    except Exception as e:
+        return False, 0, f"metrics_unreachable:{e}"
+
+    for line in payload.splitlines():
+        if line.startswith("cloudflared_tunnel_ha_connections "):
+            raw = line.split(" ", 1)[1].strip()
+            try:
+                n = int(float(raw))
+            except Exception:
+                return False, 0, f"metric_parse_error:{raw}"
+            if n >= 1:
+                return True, n, "ok"
+            return False, n, "zero_connections"
+    return False, 0, "metric_missing"
+
+
+def _cf_tunnel_alert_text(uid: str, is_recovery: bool, detail: str, ha_connections: int) -> str:
+    lang = get_user_lang(uid)
+    now_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if is_recovery:
+        if lang == "my":
+            return (
+                "✅ Cloudflare Tunnel ပြန်လည်ချိတ်ဆက်ပြီးပါပြီ\n"
+                f"အချိန်: {now_txt}\n"
+                f"HA Connections: {ha_connections}\n"
+                "ပြင်ပဝင်ရောက်မှု ပြန်လည်အသုံးပြုနိုင်ပါပြီ။"
+            )
+        if lang == "en":
+            return (
+                "✅ Cloudflare Tunnel recovered\n"
+                f"Time: {now_txt}\n"
+                f"HA Connections: {ha_connections}\n"
+                "External access is available again."
+            )
+        return (
+            "✅ Cloudflare Tunnel 已恢复\n"
+            f"时间: {now_txt}\n"
+            f"HA连接数: {ha_connections}\n"
+            "外网访问已恢复。"
+        )
+
+    if lang == "my":
+        return (
+            "⚠️ Cloudflare Tunnel ပြတ်တောက်သတိပေး\n"
+            f"အချိန်: {now_txt}\n"
+            f"အကြောင်းရင်း: {detail}\n"
+            f"HA Connections: {ha_connections}\n"
+            "ပြင်ပ URL ဝင်မရနိုင်ခြေရှိပါသည်။"
+        )
+    if lang == "en":
+        return (
+            "⚠️ Cloudflare Tunnel outage alert\n"
+            f"Time: {now_txt}\n"
+            f"Reason: {detail}\n"
+            f"HA Connections: {ha_connections}\n"
+            "The public URL may be unreachable."
+        )
+    return (
+        "⚠️ Cloudflare Tunnel 断连预警\n"
+        f"时间: {now_txt}\n"
+        f"原因: {detail}\n"
+        f"HA连接数: {ha_connections}\n"
+        "外网地址可能无法访问。"
+    )
+
+
+async def scheduled_cloudflared_tunnel_watch(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        is_up, ha_connections, detail = _cloudflared_ha_connections()
+        prev = _get_tg_setting_value(TG_CF_TUNNEL_STATE_KEY, "unknown").strip().lower()
+        now_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if is_up:
+            if prev == "down":
+                for uid in _daily_once_target_uids():
+                    try:
+                        await context.bot.send_message(
+                            chat_id=str(uid),
+                            text=_cf_tunnel_alert_text(str(uid), True, detail, ha_connections),
+                        )
+                    except Exception:
+                        logging.exception(f"cf_tunnel_recovery send failed: {uid}")
+            _set_tg_setting_value(TG_CF_TUNNEL_STATE_KEY, "up")
+            _set_tg_setting_value(TG_CF_TUNNEL_LAST_CHANGE_KEY, now_txt)
+            return
+
+        if prev != "down":
+            for uid in _daily_once_target_uids():
+                try:
+                    await context.bot.send_message(
+                        chat_id=str(uid),
+                        text=_cf_tunnel_alert_text(str(uid), False, detail, ha_connections),
+                    )
+                except Exception:
+                    logging.exception(f"cf_tunnel_down send failed: {uid}")
+            _set_tg_setting_value(TG_CF_TUNNEL_LAST_CHANGE_KEY, now_txt)
+        _set_tg_setting_value(TG_CF_TUNNEL_STATE_KEY, "down")
+    except Exception:
+        logging.exception("scheduled_cloudflared_tunnel_watch failed")
 
 
 def _mark_pending(uid: str, username: str) -> bool:
@@ -1316,6 +1502,18 @@ def run_bot():
                     interval=300,
                     first=30,
                     name="daily_missing_entry_reminder",
+                )
+                app.job_queue.run_repeating(
+                    scheduled_daily_once_report_link,
+                    interval=60,
+                    first=35,
+                    name="daily_once_report_link",
+                )
+                app.job_queue.run_repeating(
+                    scheduled_cloudflared_tunnel_watch,
+                    interval=60,
+                    first=20,
+                    name="cloudflared_tunnel_watch",
                 )
 
             print("🔐 AIF Industrial Secure Bot Running...", flush=True)

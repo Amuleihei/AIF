@@ -377,6 +377,7 @@ def _read_inventory_data():
             "grade": row["grade"],
             "pcs": row["pcs"],
             "volume": row["volume"],
+            "weight_kg": row.get("weight_kg", 0.0),
             "status": row["status"],
         }
     return {"product": product}
@@ -405,8 +406,31 @@ def _parse_spec_3d(spec: str):
 
 
 def _parse_spec_dwl(spec: str):
-    l, w, d = _parse_spec_3d(spec)
-    return d, w, l
+    a, b, c = _parse_spec_3d(spec)
+    parts = [a, b, c]
+    nums = []
+    for p in parts:
+        try:
+            v = float(str(p or "").strip())
+        except Exception:
+            nums = []
+            break
+        if v <= 0:
+            nums = []
+            break
+        nums.append(v)
+    # 中文注释：历史规格存在 LxWxD / DxWxL 混用，展示统一按 D(最小)-W(中间)-L(最大)。
+    if len(nums) == 3:
+        ordered = sorted(nums)
+        d_num, w_num, l_num = ordered[0], ordered[1], ordered[2]
+
+        def _fmt(v: float) -> str:
+            if abs(v - round(v)) < 1e-9:
+                return str(int(round(v)))
+            return f"{v:g}"
+
+        return _fmt(d_num), _fmt(w_num), _fmt(l_num)
+    return c, b, a
 
 
 def _format_spec_dwl(spec: str) -> str:
@@ -438,7 +462,7 @@ def _collect_finished_product_rows():
                 "数量": int(_to_int(item.get("pcs"), 0)),
                 "m³": float(_to_float(item.get("volume"), 0.0)),
                 "等级": grade or str(item.get("grade", "") or "").strip().upper(),
-                "重量(kg)": "",
+                "重量(kg)": float(_to_float(item.get("weight_kg"), 0.0)),
                 "规格": spec,
             }
         )
@@ -600,9 +624,11 @@ def _build_label_sheet(workbook: Workbook, rows: list, logo_path: Path):
                 grade = str(item.get("等级", "") or item.get("grade", "") or "").strip().upper()
                 qty = item.get("数量", 0)
                 cbm = item.get("m³", 0.0)
+                kg = float(_to_float(item.get("重量(kg)"), 0.0))
+                kg_text = f"{kg:.2f}" if kg > 0 else "____"
                 sheet.cell(r0 + 1, c0).value = f"CODE NO: {code}"
                 sheet.cell(r0 + 2, c0).value = f"SIZE: {spec}    GRADE: {grade}"
-                sheet.cell(r0 + 3, c0).value = f"PCS: {qty}    CBM: {cbm:.4f}    KG: ______"
+                sheet.cell(r0 + 3, c0).value = f"PCS: {qty}    CBM: {cbm:.4f}    KG: {kg_text}"
             else:
                 sheet.cell(r0 + 1, c0).value = "CODE NO: ____________"
                 sheet.cell(r0 + 2, c0).value = "SIZE: ____________    GRADE: ____"
@@ -698,6 +724,7 @@ def _fill_template_label_sheet(ws, rows: list):
         grade = str(item.get("等级", "") or item.get("grade", "") or "").strip().upper()
         qty = item.get("数量", 0) or 0
         cbm = float(item.get("m³", 0.0) or 0.0)
+        kg = float(_to_float(item.get("重量(kg)"), 0.0) or 0.0)
         date_text = datetime.now().strftime("%Y-%m-%d")
 
         top_cell = ws[f"{text_col}{start_row}"]
@@ -711,7 +738,7 @@ def _fill_template_label_sheet(ws, rows: list):
         code_cell.value = f"CODE NO:{_underlined_chars(code)}"
         size_cell.value = f"SIZE:{_underlined_chars(spec)}"
         grade_cell.value = f"GRADE:{_underlined_chars(grade)}"
-        pcs_cell.value = f"PCS:{_underlined_chars(str(qty))}  CBM:{_underlined_chars(f'{cbm:.4f}')}  KG:{_underlined_chars('')}"
+        pcs_cell.value = f"PCS:{_underlined_chars(str(qty))}  CBM:{_underlined_chars(f'{cbm:.4f}')}  KG:{_underlined_chars(f'{kg:.2f}' if kg > 0 else '')}"
         qc_cell.value = f"QC SIGN:{_underlined_chars('')}"
 
         top_cell.font = top_cell.font.copy(sz=13)

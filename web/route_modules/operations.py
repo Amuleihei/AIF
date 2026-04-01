@@ -104,6 +104,7 @@ def register_operations_routes(app, logger):
                     raise ValueError("invalid")
                 flow = _read_flow_data()
                 # 中文注释：管理员修正副产品库存时，三项库存都直接写入库存池，前后端统一读取该权威值。
+                flow["bark_stock_ks_pool"] = bark_ks
                 flow["bark_stock_m3"] = bark_ks / BARK_PRICE_PER_M3_KS
                 flow["dust_bag_pool"] = dust
                 flow["waste_segment_bag_pool"] = waste_segment
@@ -161,25 +162,37 @@ def register_operations_routes(app, logger):
             return _redirect_index_result(f"❌ {_t('no_admin_perm')}", error=True)
 
         kiln_id = (request.form.get("kiln_id") or "").strip().upper()
-        status = (request.form.get("status") or "").strip()
         if kiln_id not in ["A", "B", "C", "D"]:
             return _redirect_index_result("❌ invalid kiln id", error=True)
+
+        kilns = _load_kilns_data()
+        kiln = kilns.get(kiln_id, {})
+        old_status = str(kiln.get("status", "empty") or "empty")
+        status_raw = (request.form.get("status") or "").strip()
+        status = status_raw or old_status
 
         valid_status = {"empty", "loading", "drying", "unloading", "ready", "completed"}
         if status not in valid_status:
             return _redirect_index_result("❌ invalid kiln status", error=True)
 
-        elapsed_hours = _to_int(request.form.get("elapsed_hours"), -1)
-        remaining_hours = _to_int(request.form.get("remaining_hours"), -1)
-        total_trays = _to_int(request.form.get("total_trays"), -1)
-        remaining_trays = _to_int(request.form.get("remaining_trays"), -1)
+        def _opt_nonneg(field: str):
+            raw = request.form.get(field)
+            txt = str(raw or "").strip()
+            if txt == "":
+                return None
+            val = _to_int(txt, -1)
+            if val < 0:
+                return "invalid"
+            return val
 
-        if elapsed_hours < -1 or remaining_hours < -1 or total_trays < -1 or remaining_trays < -1:
+        elapsed_hours = _opt_nonneg("elapsed_hours")
+        remaining_hours = _opt_nonneg("remaining_hours")
+        total_trays = _opt_nonneg("total_trays")
+        remaining_trays = _opt_nonneg("remaining_trays")
+
+        if "invalid" in {elapsed_hours, remaining_hours, total_trays, remaining_trays}:
             return _redirect_index_result(f"❌ {_t('adjust_invalid_value')}", error=True)
 
-        kilns = _load_kilns_data()
-        kiln = kilns.get(kiln_id, {})
-        old_status = str(kiln.get("status", "empty") or "empty")
         kiln["status"] = status
         if old_status != status:
             kiln["status_changed_at"] = int(time.time())
@@ -192,13 +205,14 @@ def register_operations_routes(app, logger):
             now_ts = int(time.time())
             elapsed_calc_hours = elapsed_hours
             remaining_calc_hours = remaining_hours
-            if elapsed_calc_hours < 0 and remaining_calc_hours >= 0:
+            if elapsed_calc_hours is None and remaining_calc_hours is None:
+                elapsed_calc_hours = 0 if old_status != "drying" else None
+            if elapsed_calc_hours is None and remaining_calc_hours is not None:
                 elapsed_calc_hours = max(0, 120 - remaining_calc_hours)
-            if elapsed_calc_hours < 0:
-                elapsed_calc_hours = 0
-            start_ts = max(0, now_ts - elapsed_calc_hours * 3600)
-            kiln["dry_start"] = start_ts
-            kiln["start"] = datetime.fromtimestamp(start_ts).isoformat()
+            if elapsed_calc_hours is not None:
+                start_ts = max(0, now_ts - max(0, elapsed_calc_hours) * 3600)
+                kiln["dry_start"] = start_ts
+                kiln["start"] = datetime.fromtimestamp(start_ts).isoformat()
         elif status in {"empty", "loading", "completed"}:
             kiln["dry_start"] = None
             kiln["start"] = None
@@ -207,19 +221,23 @@ def register_operations_routes(app, logger):
                 kiln["unloaded_count"] = 0
                 kiln["unloading_total_trays"] = 0
 
-        if total_trays >= 0:
+        if total_trays is not None and status in {"ready", "unloading", "completed"}:
             kiln["unloading_total_trays"] = total_trays
-            if remaining_trays >= 0:
+            if remaining_trays is not None:
                 remaining_trays = min(remaining_trays, total_trays)
                 kiln["unloaded_count"] = max(0, total_trays - remaining_trays)
+        elif status in {"loading", "drying"} and (old_status != status):
+            tray_list = kiln.get("trays", [])
+            auto_total = sum(_to_int(item.get("count"), 0) for item in tray_list) if isinstance(tray_list, list) else 0
+            kiln["unloading_total_trays"] = auto_total
+            kiln["unloaded_count"] = 0
         elif status == "unloading":
             tray_list = kiln.get("trays", [])
             auto_total = sum(_to_int(item.get("count"), 0) for item in tray_list) if isinstance(tray_list, list) else 0
-            if auto_total > 0:
+            if auto_total > 0 and remaining_trays is not None:
                 kiln["unloading_total_trays"] = auto_total
-                if remaining_trays >= 0:
-                    remaining_trays = min(remaining_trays, auto_total)
-                    kiln["unloaded_count"] = max(0, auto_total - remaining_trays)
+                remaining_trays = min(remaining_trays, auto_total)
+                kiln["unloaded_count"] = max(0, auto_total - remaining_trays)
 
         kilns[kiln_id] = kiln
         _save_kilns_data(kilns)
@@ -232,7 +250,7 @@ def register_operations_routes(app, logger):
         audit_admin_action(
             "adjust_kiln",
             target=kiln_id,
-            detail=f"{old_status}->{status}, total={total_trays}, remaining={remaining_trays}",
+            detail=f"{old_status}->{status}, elapsed={elapsed_hours}, remain_h={remaining_hours}, total={total_trays}, remaining={remaining_trays}",
         )
         return _redirect_index_result(
             f"✅ {_t('kiln_adjust_saved')}（{kiln_id}: {old_status_label} → {new_status_label}）",
