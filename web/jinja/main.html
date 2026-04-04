@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ texts.title }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/main.css') }}">
     {% include 'partials/main_head_script.html' %}
@@ -25,20 +26,32 @@
             {{ texts.login }}: {{ current_user.username }} |
             {% set role = (current_user.role or '')|lower %}
             {% set can_hr_employees = current_user.has_permission('admin') or role in ['finance', 'stats'] %}
+            {% set can_hr_attendance = can_hr_employees %}
             {% if current_user.has_permission('admin') %}
             <a href="{{ url_for('admin_root', lang=lang) }}">{{ texts.get('admin_overview_link', texts.manage_link) }}</a> |
             <a href="{{ url_for('admin_alert_center', lang=lang) }}">{{ texts.get('alert_center_link', 'Alert Center') }}</a> |
             {% endif %}
-            {% if can_hr_employees %}
-            <a href="{{ url_for('admin_hr_employees', lang=lang) }}">{{ texts.get('employee_mgmt_link', 'Employee Management') }}</a> |
+            {% if can_hr_attendance %}
+            <a href="{{ url_for('admin_hr_attendance', lang=lang) }}">{{ texts.get('attendance_mgmt_link', '考勤管理') }}</a> |
             {% endif %}
             <a href="{{ url_for('logout') }}" class="logout-btn">{{ texts.logout }}</a>
         </div>
 
-        <h1>🏭 {{ texts.title }}</h1>
+        <div class="aif-logo-wrap">
+            <img src="{{ url_for('static', filename='AIF_logo.png') }}" alt="AIF Logo" class="aif-logo">
+        </div>
+        <h1>{{ texts.title }}</h1>
         <div id="entry-reminder-strip" class="entry-reminder-strip">
             <strong>{{ texts.entry_reminder_title }}</strong>
             <span id="entry-reminder-text"></span>
+        </div>
+        <div id="entry-reminder-float" class="entry-reminder-float" style="display:none;">
+            <div class="entry-reminder-float-header">
+                <strong>{{ texts.entry_reminder_title }}</strong>
+                <button id="entry-reminder-float-close" type="button" class="entry-reminder-float-close">{{ texts.close_btn }}</button>
+            </div>
+            <div id="entry-reminder-float-subtitle" class="entry-reminder-float-subtitle"></div>
+            <ul id="entry-reminder-float-list" class="entry-reminder-float-list"></ul>
         </div>
 
         {% if alerts %}
@@ -132,7 +145,7 @@
 
         <div class="pair-grid">
             <!-- 原木入库环节 -->
-            <div class="section">
+            <div class="section" id="section-log-entry">
                 <h2>{{ texts.log_section }}</h2>
                 <p>{{ texts.log_stock }} {{ "%.4f"|format(log_stock) }} {{ texts.unit_mt }}
                 {% if current_user.has_permission('admin') %}
@@ -141,7 +154,7 @@
                 </p>
                 <form method="POST" action="/submit_log_entry?lang={{ lang }}" onsubmit="return beforeSubmitLogEntryForm()">
                     <div class="form-group">
-                        <button type="button" onclick="openLogEntryModal()">{{ texts.log_entry_modal_btn }}</button>
+                        <button type="button" id="log-entry-open-btn" onclick="openLogEntryModal()">{{ texts.log_entry_modal_btn }}</button>
                         {% if current_user.has_permission('export') %}
                         <button type="button" onclick="openLogEntryListModal()" style="background:#0d6efd;">{{ texts.log_view_history }}</button>
                         {% endif %}
@@ -170,7 +183,7 @@
             </div>
 
             <!-- 锯解环节 -->
-            <div class="section">
+            <div class="section" id="section-saw">
                 <h2>🪚 {{ texts.saw_section }}</h2>
                 <p>{{ texts.current_log_stock }} {{ "%.4f"|format(log_stock) }} {{ texts.unit_mt }}</p>
                 <p>{{ texts.current_saw_stock }} {{ saw_stock }} {{ texts.unit_tray }}
@@ -178,7 +191,7 @@
                     <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('saw', '{{ saw_stock }}')">{{ texts.edit_btn }}</button>
                 {% endif %}
                 </p>
-                <form method="POST" action="/submit_saw?lang={{ lang }}">
+                <form method="POST" action="/submit_saw?lang={{ lang }}" onsubmit="return lockStageSubmit(this, 'submit_saw')">
                     <div class="form-group">
                         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                             <label style="margin:0; white-space:nowrap;">{{ texts.saw_daily }}</label>
@@ -207,7 +220,7 @@
 
         <div class="pair-grid">
             <!-- 药浸环节 -->
-            <div class="section">
+            <div class="section" id="section-dip">
                 <h2>{{ texts.dip_section }}</h2>
                 <p>{{ texts.current_saw_stock }} {{ saw_stock }} {{ texts.unit_tray }}</p>
                 <p>{{ texts.current_dip_chem_stock }} {{ "%.2f"|format(dip_chem_bag_stock) }} {{ texts.unit_bag }}
@@ -216,7 +229,7 @@
                 {% endif %}
                 </p>
                 <p>{{ texts.current_dip_additive_stock }} {{ "%.2f"|format(dip_additive_kg_stock) }} {{ texts.unit_kg }}</p>
-                <form method="POST" action="/submit_dip?lang={{ lang }}">
+                <form method="POST" action="/submit_dip?lang={{ lang }}" onsubmit="return lockStageSubmit(this, 'submit_dip')">
                     <div class="form-group">
                         <label>{{ texts.dip_daily }}</label>
                         <input type="number" name="dip_cans" min="0" placeholder="{{ texts.placeholder_can }}"> {{ texts.unit_can }}
@@ -249,14 +262,14 @@
             </div>
 
             <!-- 拣选环节 -->
-            <div class="section">
+            <div class="section" id="section-sort">
                 <h2>{{ texts.sort_section }}</h2>
                 <p>{{ texts.current_dip_stock }} {{ dip_stock }} {{ texts.unit_tray }}
                 {% if current_user.has_permission('admin') %}
                     <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('dip', '{{ dip_stock }}')">{{ texts.edit_btn }}</button>
                 {% endif %}
                 </p>
-                <form method="POST" action="/submit_sort?lang={{ lang }}" onsubmit="return beforeSubmitSortForm()">
+                <form method="POST" action="/submit_sort?lang={{ lang }}" onsubmit="return beforeSubmitSortForm() && lockStageSubmit(this, 'submit_sort')">
                     <div class="form-group">
                         <label>{{ texts.sort_daily }}</label>
                         <input type="number" id="sort_trays_input" name="sort_trays" placeholder="{{ texts.placeholder_tray }}" required> {{ texts.unit_tray }}
@@ -264,7 +277,7 @@
                     </div>
                     <input type="hidden" id="sorted_kiln_trays" name="sorted_kiln_trays">
                     <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                        <button type="button" onclick="openSortTrayModal()">{{ texts.open_sort_tray_modal }}</button>
+                        <button type="button" id="sort-open-tray-btn" onclick="openSortTrayModal()">{{ texts.open_sort_tray_modal }}</button>
                         <button type="submit">{{ texts.submit_sort }}</button>
                         <span id="sort-staged-indicator" style="display:none; align-self:center; font-size:12px; color:#666;">{{ texts.sort_staged_count }} 0 {{ texts.unit_kiln_tray }}</span>
                     </div>
@@ -273,7 +286,7 @@
         </div>
 
         <!-- 窑环节 -->
-        <div class="section">
+        <div class="section" id="section-secondary">
             <h2>{{ texts.kiln_section }}</h2>
             <p>{{ texts.pending_kiln_stock }} {{ sorting_stock }} {{ texts.unit_kiln_tray }}
                 <button type="button" class="edit-mini-btn" onclick="openPendingTrayModal()">{{ texts.view_pending_trays }}</button>
@@ -295,16 +308,16 @@
                     {% endif %}
 
                     <!-- 操作按钮 -->
-                    <div class="form-group" style="display: flex; gap: 8px; margin-bottom: 15px;">
-                        <button type="button" onclick="startDrying('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #dc3545; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_dry }}</button>
-                        <button type="button" onclick="startUnloading('{{ kiln_id }}', {{ kiln_status[kiln_id].elapsed_hours or 0 }}, '{{ kiln_status[kiln_id].status }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #ffc107; color: black; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_unload }}</button>
-                        <button type="button" onclick="completeKiln('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #28a745; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.complete }}</button>
-                        <button type="button" onclick="openKilnTrayModal('{{ kiln_id }}')" style="background: #6f42c1; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 84px; font-size: 15px; line-height: 1.2;">{{ texts.view_kiln_trays }}</button>
+                    <div class="form-group kiln-actions-row">
+                        <button type="button" class="kiln-btn kiln-btn-compact" onclick="startDrying('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #dc3545; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_dry }}</button>
+                        <button type="button" class="kiln-btn kiln-btn-compact" onclick="startUnloading('{{ kiln_id }}', {{ kiln_status[kiln_id].elapsed_hours or 0 }}, '{{ kiln_status[kiln_id].status }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #ffc107; color: black; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.start_unload }}</button>
+                        <button type="button" class="kiln-btn kiln-btn-compact" onclick="completeKiln('{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #28a745; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 64px; font-size: 15px; line-height: 1.2;">{{ texts.complete }}</button>
+                        <button type="button" class="kiln-btn kiln-btn-compact" onclick="openKilnTrayModal('{{ kiln_id }}')" style="background: #6f42c1; color: white; padding: 10px 0; border: none; border-radius: 4px; cursor: pointer; width: 84px; font-size: 15px; line-height: 1.2;">{{ texts.view_kiln_trays }}</button>
                     </div>
 
-                    <div class="form-group" style="margin-top: 15px; display:flex; gap:8px; flex-wrap:wrap;">
-                        <button type="button" onclick="openTrayPickerModal('load', '{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }})" style="background: #007bff; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_load }}</button>
-                        <button type="button" onclick="openTrayPickerModal('unload', '{{ kiln_id }}')" style="background: #17a2b8; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_unload }}</button>
+                    <div class="form-group kiln-actions-row kiln-actions-secondary">
+                        <button type="button" class="kiln-btn kiln-btn-wide" onclick="openTrayPickerModal('load', '{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }}, '{{ kiln_status[kiln_id].status }}')" style="background: #007bff; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_load }}</button>
+                        <button type="button" class="kiln-btn kiln-btn-wide" onclick="openTrayPickerModal('unload', '{{ kiln_id }}', {{ kiln_status[kiln_id].remaining_kiln_trays or 0 }}, '{{ kiln_status[kiln_id].status }}')" style="background: #17a2b8; color: white; padding: 12px 0; border: none; border-radius: 4px; cursor: pointer; width: 146px; font-size: 15px; line-height: 1.2; text-align: center;">{{ texts.pick_unload }}</button>
                     </div>
                 </div>
                 {% endfor %}
@@ -319,7 +332,7 @@
                 <button type="button" class="edit-mini-btn" onclick="openStockAdjustModal('kiln_done', '{{ kiln_done_stock }}')">{{ texts.edit_btn }}</button>
             {% endif %}
             </p>
-            <form method="POST" action="/submit_secondary_sort?lang={{ lang }}" onsubmit="return beforeSubmitSecondarySortForm()">
+            <form method="POST" action="/submit_secondary_sort?lang={{ lang }}" onsubmit="return beforeSubmitSecondarySortForm() && lockStageSubmit(this, 'submit_secondary_sort')">
                 <div class="form-group">
                     <label>{{ texts.secondary_trays }}</label>
                     <input type="text" id="secondary_sort_trays" name="secondary_sort_trays" placeholder="{{ texts.placeholder_secondary_ids }}">
@@ -330,11 +343,11 @@
                     <input type="number" id="secondary_waste_segment_bags" name="waste_segment_bags" min="0" placeholder="{{ texts.placeholder_bag }}" value="0"> {{ texts.unit_bag }}
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="button" onclick="openSecondaryProductModal()">{{ texts.add_product_btn }}</button>
+                    <button type="button" id="secondary-open-product-btn" onclick="openSecondaryProductModal()">{{ texts.add_product_btn }}</button>
                     <button type="submit">{{ texts.submit_secondary }}</button>
                 </div>
             </form>
-            <form id="secondary-products-form" method="POST" action="/submit_secondary_products?lang={{ lang }}" style="display:none;">
+            <form id="secondary-products-form" method="POST" action="/submit_secondary_products?lang={{ lang }}" onsubmit="return lockStageSubmit(this, 'submit_secondary_products')" style="display:none;">
                 <input type="hidden" id="finished_product_trays" name="finished_product_trays">
                 <input type="hidden" id="confirm_missing_secondary_sort" name="confirm_missing_secondary_sort" value="0">
             </form>
@@ -400,7 +413,7 @@
                     >{{ texts.edit_btn }}</button>
                     {% endif %}
                 </p>
-                <form method="POST" action="/submit_byproduct_sale?lang={{ lang }}">
+                <form method="POST" action="/submit_byproduct_sale?lang={{ lang }}" onsubmit="return lockStageSubmit(this, 'submit_byproduct_sale')">
                     <div class="form-group">
                         <label>{{ texts.sell_dust }}</label>
                         <input type="number" name="sell_dust_bags" min="0" placeholder="{{ texts.placeholder_bag }}" required> {{ texts.unit_bag }}

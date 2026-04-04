@@ -21,6 +21,7 @@ from web.route_support import (
     SawMachineLogDetail,
     SawMachineRecord,
     Session,
+    FlowMetric,
     SortRecord,
     TrayBatch,
     current_user,
@@ -83,6 +84,145 @@ def _get_kiln_max_trays() -> int:
         return max(1, val)
     except Exception:
         return KILN_MAX_TRAYS_DEFAULT
+
+
+def _normalize_kiln_trays_fingerprint(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    parts = [p.strip() for p in text.replace("，", ",").split(",") if p.strip()]
+    return ",".join(parts)
+
+
+def _is_duplicate_kiln_action_request(
+    kiln_id: str,
+    action: str,
+    trays: str,
+    confirm_dry: str,
+    confirm_unload: str,
+    confirm_missing_sort: str,
+    window_sec: int = 8,
+) -> bool:
+    """
+    中文注释：短时间内相同窑动作请求直接拦截，防止双击/网络卡顿导致重复提交。
+    """
+    user = str(getattr(current_user, "username", "") or "").strip().lower()
+    if not user:
+        return False
+    kid = str(kiln_id or "").strip().upper()
+    act = str(action or "").strip().lower()
+    if not kid or not act:
+        return False
+
+    normalized_trays = _normalize_kiln_trays_fingerprint(trays)
+    fingerprint = "|".join(
+        [
+            kid,
+            act,
+            normalized_trays,
+            str(confirm_dry or "0"),
+            str(confirm_unload or "0"),
+            str(confirm_missing_sort or "0"),
+        ]
+    )
+    now_ts = int(time.time())
+    metric_key = f"kiln_req_guard:{user}:{kid}:{act}"
+
+    session = Session()
+    try:
+        row = session.query(FlowMetric).filter_by(key=metric_key).first()
+        prev_ts = 0
+        prev_fp = ""
+        if row and str(row.value or "").strip():
+            raw = str(row.value or "")
+            head, sep, tail = raw.partition("|")
+            if sep:
+                prev_ts = _to_int(head, 0)
+                prev_fp = tail
+        is_dup = bool(prev_fp and prev_fp == fingerprint and (now_ts - prev_ts) <= max(1, int(window_sec)))
+
+        if not row:
+            row = FlowMetric(key=metric_key, value="")
+            session.add(row)
+        row.value = f"{now_ts}|{fingerprint}"
+        session.commit()
+        return is_dup
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        session.close()
+
+
+def _normalize_stage_submit_value(raw) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if (text.startswith("{") and text.endswith("}")) or (text.startswith("[") and text.endswith("]")):
+        try:
+            parsed = json.loads(text)
+            return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        except Exception:
+            pass
+    return " ".join(text.split())
+
+
+def _is_duplicate_stage_submit_request(scope: str, form_data, window_sec: int = 8) -> bool:
+    """
+    中文注释：统一拦截短时间内同用户、同环节、同表单内容的重复提交。
+    """
+    user = str(getattr(current_user, "username", "") or "").strip().lower()
+    scope_key = str(scope or "").strip().lower()
+    if not user or not scope_key:
+        return False
+
+    try:
+        payload = form_data.to_dict(flat=True) if hasattr(form_data, "to_dict") else dict(form_data or {})
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    fingerprint_parts = []
+    for key in sorted(payload.keys()):
+        k = str(key or "").strip()
+        if not k:
+            continue
+        v = _normalize_stage_submit_value(payload.get(key, ""))
+        fingerprint_parts.append(f"{k}={v}")
+    fingerprint = "|".join(fingerprint_parts)
+
+    now_ts = int(time.time())
+    metric_key = f"stage_submit_guard:{user}:{scope_key}"
+    session = Session()
+    try:
+        row = session.query(FlowMetric).filter_by(key=metric_key).first()
+        prev_ts = 0
+        prev_fp = ""
+        if row and str(row.value or "").strip():
+            head, sep, tail = str(row.value or "").partition("|")
+            if sep:
+                prev_ts = _to_int(head, 0)
+                prev_fp = tail
+        is_dup = bool(prev_fp and prev_fp == fingerprint and (now_ts - prev_ts) <= max(1, int(window_sec)))
+
+        if not row:
+            row = FlowMetric(key=metric_key, value="")
+            session.add(row)
+        row.value = f"{now_ts}|{fingerprint}"
+        session.commit()
+        return is_dup
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        return False
+    finally:
+        session.close()
 
 
 def _parse_secondary_sort_input(raw: str):
@@ -813,6 +953,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_saw():
         try:
+            if _is_duplicate_stage_submit_request("submit_saw", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             saw_machine_records = []
             raw_machine_payload = request.form.get("saw_machine_payload", "")
             if str(raw_machine_payload or "").strip():
@@ -923,6 +1065,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_byproduct_sale():
         try:
+            if _is_duplicate_stage_submit_request("submit_byproduct_sale", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             sell_dust_bags = _to_int(request.form.get("sell_dust_bags"), 0)
             sell_bark_ks = _to_float(request.form.get("sell_bark_ks"), 0.0)
             sell_waste_segment_bags = _to_int(request.form.get("sell_waste_segment_bags"), 0)
@@ -1043,6 +1187,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_dip():
         try:
+            if _is_duplicate_stage_submit_request("submit_dip", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             dip_cans = _to_int(request.form.get("dip_cans"), 0)
             dip_trays = _to_int(request.form.get("dip_trays"), 0)
             dip_chemicals = _to_float(request.form.get("dip_chemicals"), 0.0)
@@ -1136,6 +1282,8 @@ def register_production_kiln_routes(app, logger=None):
             return redirect(url_for("index", lang=get_lang()))
 
         try:
+            if _is_duplicate_stage_submit_request("submit_sort", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             sort_trays = _to_int(request.form.get("sort_trays"), 0)
             sorted_kiln_trays = request.form.get("sorted_kiln_trays", "").strip()
 
@@ -1187,12 +1335,26 @@ def register_production_kiln_routes(app, logger=None):
             kiln_id = request.form.get("kiln_id", "")
             action = request.form.get("action", "")
             trays = request.form.get("trays", "")
+            confirm_dry = request.form.get("confirm_dry", "0")
+            confirm_unload = request.form.get("confirm_unload", "0")
+            confirm_missing_sort = request.form.get("confirm_missing_sort", "0")
             audit_target = ""
             audit_detail = ""
 
+            if action in {"start_dry", "start_unload", "load", "unload", "complete"}:
+                if _is_duplicate_kiln_action_request(
+                    kiln_id=kiln_id,
+                    action=action,
+                    trays=trays,
+                    confirm_dry=confirm_dry,
+                    confirm_unload=confirm_unload,
+                    confirm_missing_sort=confirm_missing_sort,
+                    window_sec=8,
+                ):
+                    return _redirect_index_result(f"⚠️ {_t('duplicate_kiln_action_blocked')}", error=False)
+
             if action == "start_dry":
                 kiln_max_trays = _get_kiln_max_trays()
-                confirm_dry = request.form.get("confirm_dry", "0")
                 kilns = _load_kilns_data()
                 kiln_data = kilns.get(kiln_id, {})
                 trays_in_kiln = kiln_data.get("trays", [])
@@ -1218,7 +1380,6 @@ def register_production_kiln_routes(app, logger=None):
                           f"မီးဖို {kiln_id} ပြီးစီး" if lc == "my" else
                           f"窑{kiln_id} 已完成")
             elif action == "start_unload":
-                confirm_unload = request.form.get("confirm_unload", "0")
                 elapsed_hours = 0
                 try:
                     kilns = _load_kilns_data()
@@ -1258,7 +1419,6 @@ def register_production_kiln_routes(app, logger=None):
                           f"窑{kiln_id} 已完成待出")
             elif action == "load":
                 kiln_max_trays = _get_kiln_max_trays()
-                confirm_missing_sort = request.form.get("confirm_missing_sort", "0")
                 flow_data = _read_flow_data()
                 selected_tray_details = flow_data.get("selected_tray_details", [])
                 if not isinstance(selected_tray_details, list):
@@ -1269,6 +1429,13 @@ def register_production_kiln_routes(app, logger=None):
 
                 kilns = _load_kilns_data()
                 kiln_data = kilns.get(kiln_id, {})
+                current_status = str(kiln_data.get("status", "empty") or "empty").strip().lower()
+                # 中文注释：出窑中/待出/已完成/烘干中都不允许再入窑，避免状态被覆盖导致流程错乱。
+                if current_status not in {"empty", "loading"}:
+                    return _redirect_index_result(
+                        f"❌ {_t('kiln_load_blocked_by_status').format(status=current_status)}",
+                        error=True,
+                    )
                 existing_trays = kiln_data.get("trays", []) if isinstance(kiln_data.get("trays"), list) else []
                 incoming_ids = {item.get("id") for item in tray_list if isinstance(item, dict) and item.get("id")}
                 kept_existing = [
@@ -1337,15 +1504,36 @@ def register_production_kiln_routes(app, logger=None):
                 tray_list, unload_count = _parse_kiln_trays_input(trays, {}, allow_plain_count=True)
                 kilns = _load_kilns_data()
                 if kiln_id in kilns:
+                    current_status = str(kilns[kiln_id].get("status", "") or "").strip().lower()
+                    # 中文注释：仅允许在待出/出窑中执行出窑，防止空窑或烘干中误出窑导致库存虚增。
+                    if current_status not in {"ready", "unloading"}:
+                        return _redirect_index_result(
+                            f"❌ {_t('kiln_unload_blocked_by_status').format(status=current_status or 'unknown')}",
+                            error=True,
+                        )
+
+                    trays_total = sum(_to_int(tray.get("count"), 0) for tray in kilns[kiln_id].get("trays", []))
+                    stored_total = _to_int(kilns[kiln_id].get("unloading_total_trays"), 0)
+                    total_trays = stored_total if stored_total > 0 else trays_total
+                    unloaded_before = _to_int(kilns[kiln_id].get("unloaded_count"), 0)
+                    remaining_before = max(0, total_trays - unloaded_before)
+                    if unload_count <= 0 or remaining_before <= 0:
+                        return _redirect_index_result(
+                            f"❌ {_t('kiln_unload_exceeds_remaining').format(remaining=remaining_before, requested=unload_count)}",
+                            error=True,
+                        )
+                    if unload_count > remaining_before:
+                        return _redirect_index_result(
+                            f"❌ {_t('kiln_unload_exceeds_remaining').format(remaining=remaining_before, requested=unload_count)}",
+                            error=True,
+                        )
+
                     # 中文注释：若当前为完成待出(ready)，发生出窑动作后自动进入出窑中(unloading)。
-                    current_status = str(kilns[kiln_id].get("status", "") or "")
                     if unload_count > 0 and current_status == "ready":
                         kilns[kiln_id]["status"] = "unloading"
                         kilns[kiln_id]["status_changed_at"] = int(time.time())
 
                     kilns[kiln_id]["unloaded_count"] = kilns[kiln_id].get("unloaded_count", 0) + unload_count
-                    trays_total = sum(tray.get("count", 0) for tray in kilns[kiln_id].get("trays", []))
-                    stored_total = int(kilns[kiln_id].get("unloading_total_trays", 0) or 0)
                     # 中文注释：管理员修正过总托数时，出窑流程也以该值为准。
                     total_trays = stored_total if stored_total > 0 else trays_total
                     if total_trays < kilns[kiln_id]["unloaded_count"]:
@@ -1409,6 +1597,7 @@ def register_production_kiln_routes(app, logger=None):
                 result = (f"Unknown kiln action: {action}" if lc == "en" else
                           f"မသိသော မီးဖိုလုပ်ဆောင်ချက်: {action}" if lc == "my" else
                           f"窑{kiln_id} 操作未知：{action}")
+                return _redirect_index_result(f"❌ {result}", error=True)
 
             if action in {"start_dry", "complete", "start_unload", "load", "unload"}:
                 audit_admin_action("kiln_action", target=audit_target, detail=audit_detail)
@@ -1420,6 +1609,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_secondary_sort():
         try:
+            if _is_duplicate_stage_submit_request("submit_secondary_sort", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             secondary_sort_id_set, secondary_sort_trays = _parse_secondary_sort_input(
                 request.form.get("secondary_sort_trays", "")
             )
@@ -1497,6 +1688,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_secondary_products():
         try:
+            if _is_duplicate_stage_submit_request("submit_secondary_products", request.form, window_sec=8):
+                return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             confirm_missing_secondary_sort = request.form.get("confirm_missing_secondary_sort", "0")
             day_prefix = _today_prefix()
             session = Session()

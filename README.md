@@ -1,5 +1,7 @@
 # AIF - 木材厂智能管理系统 / Smart Management for Wood Factories / သစ်စက်ရုံ စမတ်စီမံခန့်ခွဲမှုစနစ်
 
+![AIF Logo](static/AIF_logo.png)
+
 中文 | English | မြန်မာ
 
 ## 中文

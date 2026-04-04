@@ -20,7 +20,7 @@ sys.path.append(BASE)
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
+    MenuButtonWebApp,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
@@ -60,6 +60,7 @@ from modules.i18n.shortcut_engine import shortcut_to_cn
 from web.models import Session, TgSetting, TgPendingUser
 from web.services.entry_reminder_service import get_daily_missing_entry_status
 from web.services.daily_once_link_service import issue_daily_once_token, build_daily_once_link
+from web.services.tg_login_token_service import issue_tg_login_token, build_tg_login_link
 from modules.report.report_engine import handle_report
 from modules.report.daily_report_engine import handle_daily_report
 from modules.report.system_report import handle_system_report
@@ -129,9 +130,8 @@ def boss_menu_keyboard(lang: str | None = None) -> ReplyKeyboardMarkup:
         [ui_label("工厂状态", lang), ui_label("库存概况", lang)],
         [ui_label("窑概况", lang)],
     ]
-    app_btn = miniapp_keyboard_button(lang)
-    if app_btn:
-        rows.append([app_btn])
+    if _workspace_base_url():
+        rows.append([f"🌐 {ui_label('工作台', lang)}"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -514,6 +514,38 @@ def _daily_once_web_base_url() -> str:
     return cfg_url.rstrip("/") if cfg_url else ""
 
 
+def _workspace_base_url() -> str:
+    raw = str(os.getenv("AIF_WEB_BASE_URL", "") or "").strip()
+    if not raw:
+        raw = str(get_miniapp_url() or "").strip()
+    if not raw:
+        raw = str(_get_tg_setting_value("web_base_url", "") or "").strip()
+    raw = raw.rstrip("/")
+    if raw.endswith("/tg/mini"):
+        raw = raw[:-8]
+    return raw.rstrip("/")
+
+
+def _workspace_menu_url() -> str:
+    base = _workspace_base_url()
+    if not base:
+        return ""
+    return f"{base}/tg/mini"
+
+
+def _workspace_login_url_for_uid(uid: str) -> str:
+    base = _workspace_base_url()
+    uid_text = str(uid or "").strip()
+    if not base or not uid_text:
+        return ""
+    try:
+        token = issue_tg_login_token(uid_text, ttl_seconds=3600)
+        return build_tg_login_link(base, token)
+    except Exception:
+        logging.exception("issue_tg_login_token failed uid=%s", uid_text)
+        return ""
+
+
 def _daily_once_text_for_uid(uid: str, day: str, link: str) -> str:
     lang = get_user_lang(uid)
     if lang == "my":
@@ -797,6 +829,8 @@ def ui_label(text: str, lang: str) -> str:
 
 def normalize_ui_text(text: str) -> str:
     t = text.strip()
+    if t.startswith("🌐"):
+        t = t.lstrip("🌐").strip()
     if t in MY_TO_ZH:
         return MY_TO_ZH[t]
     if t in EN_TO_ZH:
@@ -843,18 +877,9 @@ def admin_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
         [ui_label("窑概况", lang), ui_label("日报", lang)],
         [ui_label("菜单", lang)],
     ]
-    app_btn = miniapp_keyboard_button(lang)
-    if app_btn:
-        rows.append([app_btn])
+    if _workspace_base_url():
+        rows.append([f"🌐 {ui_label('工作台', lang)}"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
-
-
-def miniapp_keyboard_button(lang: str | None = None) -> KeyboardButton | None:
-    url = get_miniapp_url()
-    if not url:
-        return None
-    title = ui_label("工作台", lang or get_default_lang())
-    return KeyboardButton(text=f"🌐 {title}", web_app=WebAppInfo(url=url))
 
 
 def keyboard_for_role(role: str, uid: str | None, admin_boss_mode: bool = False) -> ReplyKeyboardMarkup | None:
@@ -1167,16 +1192,29 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if role == "老板":
         await update.message.reply_text(localize_output(boss_home_text(), role, uid), reply_markup=boss_menu_keyboard(get_default_lang()))
-        if get_miniapp_url():
-            await update.message.reply_text("🌐 已启用 MiniApp，请点击键盘中的“工作台”进入。")
+
+        login_url = _workspace_login_url_for_uid(uid)
+        if login_url:
+            inline_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🌐 打开工作台", url=login_url)]
+            ])
+            await update.message.reply_text(
+                "🌐 已启用工作台，点击可直接登录并打开 Web 页面。",
+                reply_markup=inline_kb
+            )
         return
 
     await update.message.reply_text(
         tr_text("start_logged_in", effective_lang(role, uid)),
         reply_markup=keyboard_for_role(role, uid),
     )
-    if get_miniapp_url():
-        await update.message.reply_text("🌐 已启用 MiniApp，请点击键盘中的“工作台”进入。")
+    login_url = _workspace_login_url_for_uid(uid)
+    if login_url:
+        inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 打开工作台", url=login_url)]])
+        await update.message.reply_text(
+            "🌐 已启用工作台，点击可直接登录并打开 Web 页面。",
+            reply_markup=inline_kb,
+        )
 
 
 async def handle_set_role_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1245,11 +1283,15 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if text == "工作台":
-            url = get_miniapp_url()
+            url = _workspace_login_url_for_uid(uid)
             if url:
-                await update.message.reply_text(f"🌐 MiniApp: {url}")
+                inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🌐 打开工作台", url=url)]])
+                await update.message.reply_text(
+                    "🌐 点击下方按钮直接登录并打开 Web 工作台页面。",
+                    reply_markup=inline_kb,
+                )
             else:
-                await update.message.reply_text("⛔ 尚未配置 TG_MINIAPP_URL")
+                await update.message.reply_text("⛔ 尚未配置 Web 地址（AIF_WEB_BASE_URL）")
             return
 
         # =================================================
@@ -1471,11 +1513,26 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     token = get_bot_token()
+    menu_web_url = _workspace_menu_url()
 
     # 这里必须做“自恢复”循环：现场网络波动/Telegram 连接超时会导致 run_polling 抛异常退出。
     # 若不自恢复，TG 端表现为“无回复”（进程已死）。
     while True:
         try:
+            async def _post_init(application):
+                if not menu_web_url:
+                    return
+                try:
+                    await application.bot.set_chat_menu_button(
+                        menu_button=MenuButtonWebApp(
+                            text="工作台",
+                            web_app=WebAppInfo(url=menu_web_url),
+                        )
+                    )
+                    logging.info("set_chat_menu_button ok url=%s", menu_web_url)
+                except Exception:
+                    logging.exception("set_chat_menu_button failed")
+
             # Increase timeouts for field networks (ConnectTimeout/TimedOut were common).
             # Use separate request objects: long-polling needs longer read timeout.
             proxy = os.getenv("BOT_PROXY") or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
@@ -1487,6 +1544,7 @@ def run_bot():
                 .token(token)
                 .request(req)
                 .get_updates_request(get_updates_req)
+                .post_init(_post_init)
                 .build()
             )
 

@@ -1,5 +1,42 @@
     <script>
         const KILN_MAX_TRAYS = Math.max(1, Number('{{ kiln_max_trays or 70 }}') || 70);
+        const KILN_ACTION_LOCKS = new Set();
+        const STAGE_SUBMIT_LOCKS = new Set();
+
+        function _withKilnActionLock(lockKey, runner) {
+            if (KILN_ACTION_LOCKS.has(lockKey)) {
+                alert('{{ texts.kiln_action_submitting }}');
+                return;
+            }
+            KILN_ACTION_LOCKS.add(lockKey);
+            runner()
+                .catch(() => alert('{{ texts.kiln_action_network_retry }}'))
+                .finally(() => KILN_ACTION_LOCKS.delete(lockKey));
+        }
+
+        function lockStageSubmit(form, lockKey) {
+            if (!form) return false;
+            const key = `stage:${String(lockKey || form.getAttribute('action') || '').trim() || 'submit'}`;
+            if (STAGE_SUBMIT_LOCKS.has(key)) {
+                alert('{{ texts.stage_submit_submitting }}');
+                return false;
+            }
+            STAGE_SUBMIT_LOCKS.add(key);
+            const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.7';
+            }
+            window.setTimeout(() => {
+                if (!document.body.contains(form)) return;
+                STAGE_SUBMIT_LOCKS.delete(key);
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.style.opacity = '';
+                }
+            }, 12000);
+            return true;
+        }
 
         function startDrying(kilnId, remainingTrays) {
             const loadedTrays = Number(remainingTrays) || 0;
@@ -11,17 +48,19 @@
                 if (!confirm(msg)) return;
                 confirmFlag = '1';
             }
-            storeScrollPosition();
-            fetch('/kiln_action?lang={{ lang }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'kiln_id=' + kilnId + '&action=start_dry&confirm_dry=' + confirmFlag
-            })
-            .then(response => response.text())
-            .then(html => {
-                replacePageHtml(html);
+            _withKilnActionLock(`kiln:${kilnId}:start_dry`, () => {
+                storeScrollPosition();
+                return fetch('/kiln_action?lang={{ lang }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'kiln_id=' + kilnId + '&action=start_dry&confirm_dry=' + confirmFlag
+                })
+                .then(response => response.text())
+                .then(html => {
+                    replacePageHtml(html);
+                });
             });
         }
 
@@ -37,17 +76,19 @@
                 }
                 confirmFlag = '1';
             }
-            storeScrollPosition();
-            fetch('/kiln_action?lang={{ lang }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'kiln_id=' + kilnId + '&action=start_unload&confirm_unload=' + confirmFlag
-            })
-            .then(response => response.text())
-            .then(html => {
-                replacePageHtml(html);
+            _withKilnActionLock(`kiln:${kilnId}:start_unload`, () => {
+                storeScrollPosition();
+                return fetch('/kiln_action?lang={{ lang }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'kiln_id=' + kilnId + '&action=start_unload&confirm_unload=' + confirmFlag
+                })
+                .then(response => response.text())
+                .then(html => {
+                    replacePageHtml(html);
+                });
             });
         }
 
@@ -56,32 +97,37 @@
                 alert(`该窑未完成，尚有${remainingTrays}托在窑中。`);
                 return;
             }
-            storeScrollPosition();
-            fetch('/kiln_action?lang={{ lang }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'kiln_id=' + kilnId + '&action=complete'
-            })
-            .then(response => response.text())
-            .then(html => {
-                replacePageHtml(html);
+            _withKilnActionLock(`kiln:${kilnId}:complete`, () => {
+                storeScrollPosition();
+                return fetch('/kiln_action?lang={{ lang }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'kiln_id=' + kilnId + '&action=complete'
+                })
+                .then(response => response.text())
+                .then(html => {
+                    replacePageHtml(html);
+                });
             });
         }
 
         function submitKilnAction(kilnId, action, data, extraFormData = '') {
-            storeScrollPosition();
-            fetch('/kiln_action?lang={{ lang }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'kiln_id=' + kilnId + '&action=' + action + '&trays=' + encodeURIComponent(data) + (extraFormData || '')
-            })
-            .then(response => response.text())
-            .then(html => {
-                replacePageHtml(html);
+            const body = 'kiln_id=' + kilnId + '&action=' + action + '&trays=' + encodeURIComponent(data) + (extraFormData || '');
+            _withKilnActionLock(`kiln:${kilnId}:${action}:${body}`, () => {
+                storeScrollPosition();
+                return fetch('/kiln_action?lang={{ lang }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: body
+                })
+                .then(response => response.text())
+                .then(html => {
+                    replacePageHtml(html);
+                });
             });
         }
 
@@ -114,7 +160,12 @@
         const CURRENT_KILN_DONE_STOCK = Number('{{ kiln_done_stock }}') || 0;
         const OVERVIEW_RADAR_LABELS = {{ (overview_radar_labels or []) | tojson }};
         const OVERVIEW_RADAR = {{ (overview_radar or {}) | tojson }};
+        // 小贴士按时段展示：16:00 前自动隐藏；16:00-17:00 可关闭；17:00 后强提醒不可关闭（全部完成后自动隐藏）。
+        const ENTRY_REMINDER_FORCE_VISIBLE = false;
         let DAILY_ENTRY_STATUS = { loaded: false, missing_sort: false, missing_secondary_sort: false };
+        let entryReminderSoftClosed = false;
+        let entryReminderAutoHideTimer = null;
+        let entryReminderDockTimer = null;
         const IS_ADMIN = {{ 'true' if current_user.has_permission('admin') else 'false' }};
         const CAN_EDIT_KILN_TRAYS = {{ 'true' if (current_user.has_permission('admin') or ((current_user.role or '')|lower in ['stats', 'statistics', 'finance', '统计'])) else 'false' }};
         const CAN_EXPORT_LOG = {{ 'true' if current_user.has_permission('export') else 'false' }};
@@ -902,13 +953,16 @@
             return String(summary || '').replace(/\d+x\d+x\d+/g, token => specToDisplay(token));
         }
 
-        function buildSortingSummary(primaryWidth, extras) {
+        function buildSortingSummary(primaryWidth, primaryQty, extras) {
             if (primaryWidth === 'other') {
-                return '1';
+                const otherQty = parseInt(String(primaryQty || '').trim(), 10);
+                return String(otherQty > 0 ? otherQty : 1);
             }
             const base = SORTING_SPEC_PCS[primaryWidth];
             if (!base) return '';
-            const parts = [`${base.spec}x${base.qty}`];
+            const qtyVal = parseInt(String(primaryQty || '').trim(), 10);
+            const mainQty = qtyVal > 0 ? qtyVal : base.qty;
+            const parts = [`${base.spec}x${mainQty}`];
             (extras || []).forEach(item => {
                 const meta = SORTING_SPEC_PCS[item.width];
                 if (!meta || !item.qty || item.qty <= 0) return;
@@ -923,7 +977,8 @@
             rows.forEach(tr => {
                 const trayId = (tr.querySelector('.st-id').value || '').trim();
                 const primaryWidth = tr.querySelector('.st-primary').value;
-                const summary = buildSortingSummary(primaryWidth, tr._extraSpecs || []);
+                const fixedQty = tr.querySelector('.st-fixed');
+                const summary = buildSortingSummary(primaryWidth, fixedQty ? fixedQty.value : '', tr._extraSpecs || []);
                 if (!trayId || !summary) {
                     return;
                 }
@@ -942,7 +997,8 @@
             }
         }
 
-        function renderSortTrayRowSummary(tr) {
+        function renderSortTrayRowSummary(tr, options = {}) {
+            const syncFixedWithPrimary = !!options.syncFixedWithPrimary;
             const primaryWidth = tr.querySelector('.st-primary').value;
             const fixedQty = tr.querySelector('.st-fixed');
             const summary = tr.querySelector('.st-summary');
@@ -951,7 +1007,12 @@
             const appendBtn = tr.querySelector('.st-append-btn');
             const meta = SORTING_SPEC_PCS[primaryWidth];
             const isOther = primaryWidth === 'other';
-            fixedQty.value = isOther ? '' : (meta ? meta.qty : '');
+            if (syncFixedWithPrimary) {
+                fixedQty.value = isOther ? '' : (meta ? meta.qty : '');
+            } else if (!isOther) {
+                const current = parseInt(String(fixedQty.value || '').trim(), 10);
+                if (!(current > 0) && meta) fixedQty.value = meta.qty;
+            }
             if (extraWidth) extraWidth.disabled = isOther;
             if (extraQty) extraQty.disabled = isOther;
             if (appendBtn) appendBtn.disabled = isOther;
@@ -959,7 +1020,7 @@
                 tr._extraSpecs = [];
                 if (extraQty) extraQty.value = '';
             }
-            summary.value = formatTrayContentForDisplay(buildSortingSummary(primaryWidth, tr._extraSpecs || []));
+            summary.value = formatTrayContentForDisplay(buildSortingSummary(primaryWidth, fixedQty.value, tr._extraSpecs || []));
         }
 
         function openSortTrayModal() {
@@ -985,7 +1046,7 @@
                         ${sortingWidthOptions(primaryWidth)}
                     </select>
                 </td>
-                <td><input type="text" class="st-fixed" readonly style="width:86px; height:30px; padding:4px 6px; font-size:12px; background:#f8f9fa;"></td>
+                <td><input type="number" class="st-fixed" min="1" placeholder="{{ texts.placeholder_qty }}" style="width:86px; height:30px; padding:4px 6px; font-size:12px;"></td>
                 <td>
                     <div style="display:flex; gap:6px; align-items:center;">
                         <select class="st-extra-width" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:92px; font-size:12px;">
@@ -1001,8 +1062,9 @@
                 </td>
             `;
             body.appendChild(tr);
-            tr.querySelector('.st-primary').addEventListener('change', () => renderSortTrayRowSummary(tr));
-            renderSortTrayRowSummary(tr);
+            tr.querySelector('.st-primary').addEventListener('change', () => renderSortTrayRowSummary(tr, { syncFixedWithPrimary: true }));
+            tr.querySelector('.st-fixed').addEventListener('input', () => renderSortTrayRowSummary(tr));
+            renderSortTrayRowSummary(tr, { syncFixedWithPrimary: true });
         }
 
         function appendSortTraySpec(btn) {
@@ -1122,15 +1184,132 @@
             }
         }
 
-        async function refreshEntryReminderStrip() {
-            const strip = document.getElementById('entry-reminder-strip');
-            const textEl = document.getElementById('entry-reminder-text');
-            if (!strip || !textEl) return;
-            const hour = (new Date()).getHours();
-            if (hour < 16) {
-                strip.style.display = 'none';
+        function markReminderTarget(el) {
+            if (!el) return;
+            el.classList.add('entry-reminder-target');
+            window.setTimeout(() => el.classList.remove('entry-reminder-target'), 1800);
+        }
+
+        function scrollToReminderSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (!section) return null;
+            section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            markReminderTarget(section);
+            return section;
+        }
+
+        function jumpToReminderTarget(key) {
+            const k = String(key || '').trim();
+            if (!k) return;
+            if (k === 'log_entry') {
+                scrollToReminderSection('section-log-entry');
+                const btn = document.getElementById('log-entry-open-btn');
+                if (btn) {
+                    btn.focus();
+                    markReminderTarget(btn);
+                }
                 return;
             }
+            if (k === 'saw') {
+                scrollToReminderSection('section-saw');
+                const input = document.getElementById('saw_tm_input');
+                if (input) {
+                    input.focus();
+                    markReminderTarget(input);
+                }
+                return;
+            }
+            if (k === 'dip') {
+                scrollToReminderSection('section-dip');
+                const input = document.querySelector('input[name="dip_cans"]');
+                if (input) {
+                    input.focus();
+                    markReminderTarget(input);
+                }
+                return;
+            }
+            if (k === 'sort_stage') {
+                scrollToReminderSection('section-sort');
+                const btn = document.getElementById('sort-open-tray-btn');
+                if (btn) {
+                    btn.focus();
+                    markReminderTarget(btn);
+                }
+                return;
+            }
+            if (k === 'sort_consumption') {
+                scrollToReminderSection('section-sort');
+                const input = document.getElementById('sort_trays_input');
+                if (input) {
+                    input.focus();
+                    markReminderTarget(input);
+                }
+                return;
+            }
+            if (k === 'secondary_sort') {
+                const input = document.getElementById('secondary_sort_trays');
+                if (input) {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    input.focus();
+                    markReminderTarget(input);
+                }
+                return;
+            }
+            if (k === 'secondary_waste_segment') {
+                const waste = document.getElementById('secondary_waste_segment_bags');
+                if (waste) {
+                    waste.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    waste.focus();
+                    markReminderTarget(waste);
+                }
+                const input = document.getElementById('secondary_sort_trays');
+                if (input) markReminderTarget(input);
+                return;
+            }
+            if (k === 'secondary_products') {
+                const btn = document.getElementById('secondary-open-product-btn');
+                if (btn) {
+                    btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    btn.focus();
+                    markReminderTarget(btn);
+                }
+                return;
+            }
+        }
+
+        function parkReminderFloatDuringJump() {
+            const floatCard = document.getElementById('entry-reminder-float');
+            if (!floatCard || floatCard.style.display === 'none') return;
+            if (entryReminderDockTimer) {
+                clearTimeout(entryReminderDockTimer);
+                entryReminderDockTimer = null;
+            }
+            floatCard.classList.remove('show');
+            entryReminderDockTimer = window.setTimeout(() => {
+                const stillVisible = floatCard.style.display !== 'none';
+                if (stillVisible) floatCard.classList.add('show');
+                entryReminderDockTimer = null;
+            }, 2200);
+        }
+
+        async function refreshEntryReminderStrip() {
+            const strip = document.getElementById('entry-reminder-strip');
+            const floatCard = document.getElementById('entry-reminder-float');
+            const subtitleEl = document.getElementById('entry-reminder-float-subtitle');
+            const listEl = document.getElementById('entry-reminder-float-list');
+            const closeBtn = document.getElementById('entry-reminder-float-close');
+            if (!strip || !floatCard || !subtitleEl || !listEl || !closeBtn) return;
+            strip.style.display = 'none';
+
+            const hour = (new Date()).getHours();
+            const mode = hour < 16 ? 'pre' : (hour < 17 ? 'soft' : 'hard');
+            const effectiveMode = ENTRY_REMINDER_FORCE_VISIBLE ? 'hard' : mode;
+            const hideFloat = () => {
+                floatCard.classList.remove('show');
+                window.setTimeout(() => {
+                    if (!floatCard.classList.contains('show')) floatCard.style.display = 'none';
+                }, 260);
+            };
             try {
                 const res = await fetch('/api/daily_missing_entry_status?lang={{ lang }}');
                 const data = await res.json();
@@ -1140,18 +1319,99 @@
                     missing_secondary_sort: !!(data && data.missing_secondary_sort),
                 };
                 refreshFlowMissingReminders();
-                const items = [];
-                if (data && data.missing_sort) items.push('{{ texts.entry_reminder_sort_missing }}');
-                if (data && data.missing_secondary_sort) items.push('{{ texts.entry_reminder_secondary_missing }}');
-                if (!items.length) {
-                    strip.style.display = 'none';
+                const sourceEntries = Array.isArray(data && data.entries) ? data.entries : [];
+                const keyMeta = {
+                    log_entry: { label: '{{ texts.entry_reminder_item_log }}', required: false, optional: true },
+                    saw: { label: '{{ texts.entry_reminder_item_saw }}', required: true, optional: false },
+                    dip: { label: '{{ texts.entry_reminder_item_dip }}', required: true, optional: false },
+                    sort_stage: { label: '{{ texts.entry_reminder_item_sort_stage }}', required: true, optional: false },
+                    sort_consumption: { label: '{{ texts.entry_reminder_item_sort }}', required: true, optional: false },
+                    secondary_sort: { label: '{{ texts.entry_reminder_item_secondary_sort }}', required: true, optional: false },
+                    secondary_waste_segment: { label: '{{ texts.entry_reminder_item_secondary_waste_segment }}', required: false, optional: true },
+                    secondary_products: { label: '{{ texts.entry_reminder_item_secondary_products }}', required: true, optional: false }
+                };
+                const desiredOrder = ['log_entry', 'saw', 'dip', 'sort_stage', 'sort_consumption', 'secondary_sort', 'secondary_waste_segment', 'secondary_products'];
+                const byKey = {};
+                sourceEntries.forEach(item => {
+                    if (!item || !item.key) return;
+                    byKey[String(item.key)] = item;
+                });
+                const rows = desiredOrder.map((key) => {
+                    const meta = keyMeta[key] || { label: key, required: true, optional: false };
+                    const src = byKey[key] || {};
+                    const required = src.required === undefined ? meta.required : !!src.required;
+                    const optional = !!meta.optional;
+                    const completed = !!src.completed;
+                    if (completed) {
+                        return {
+                            key,
+                            label: meta.label,
+                            cls: 'completed',
+                            required,
+                            completed,
+                            status: '{{ texts.entry_reminder_status_completed }}'
+                        };
+                    }
+                    if (optional) {
+                        return {
+                            key,
+                            label: meta.label,
+                            cls: 'not_due',
+                            required,
+                            completed,
+                            status: '{{ texts.entry_reminder_status_optional }}'
+                        };
+                    }
+                    return {
+                        key,
+                        label: meta.label,
+                        cls: 'missing',
+                        required,
+                        completed,
+                        status: '{{ texts.entry_reminder_status_missing }}'
+                    };
+                });
+                const allRequiredDone = rows.filter(r => r.required).every(r => r.completed);
+
+                if (entryReminderAutoHideTimer) {
+                    clearTimeout(entryReminderAutoHideTimer);
+                    entryReminderAutoHideTimer = null;
+                }
+                if (effectiveMode === 'hard' || effectiveMode === 'pre') entryReminderSoftClosed = false;
+                if (!allRequiredDone && effectiveMode === 'soft' && entryReminderSoftClosed) {
+                    hideFloat();
                     return;
                 }
-                textEl.textContent = items.join('；');
-                strip.style.display = 'block';
+
+                if (allRequiredDone || effectiveMode === 'pre') {
+                    closeBtn.disabled = true;
+                    closeBtn.style.display = 'none';
+                } else if (effectiveMode === 'soft') {
+                    closeBtn.disabled = false;
+                    closeBtn.style.display = 'inline-flex';
+                } else {
+                    closeBtn.disabled = true;
+                    closeBtn.style.display = 'inline-flex';
+                }
+                subtitleEl.textContent = allRequiredDone
+                    ? '{{ texts.entry_reminder_subtitle_all_done }}'
+                    : (effectiveMode === 'pre'
+                        ? '{{ texts.entry_reminder_subtitle_pre }}'
+                        : (effectiveMode === 'soft' ? '{{ texts.entry_reminder_subtitle_soft }}' : '{{ texts.entry_reminder_subtitle_hard }}'));
+                listEl.innerHTML = rows.map(item => (
+                    `<li class="entry-reminder-float-item"><button type="button" class="entry-reminder-link" data-reminder-key="${item.key}">${item.label}</button><span class="entry-reminder-status ${item.cls}">${item.status}</span></li>`
+                )).join('');
+
+                floatCard.style.display = 'block';
+                window.setTimeout(() => floatCard.classList.add('show'), 10);
+                if (!ENTRY_REMINDER_FORCE_VISIBLE && (effectiveMode === 'pre' || allRequiredDone)) {
+                    entryReminderAutoHideTimer = window.setTimeout(() => {
+                        hideFloat();
+                    }, 5000);
+                }
             } catch (e) {
                 DAILY_ENTRY_STATUS = { loaded: false, missing_sort: false, missing_secondary_sort: false };
-                strip.style.display = 'none';
+                hideFloat();
             }
         }
 
@@ -1239,7 +1499,21 @@
             };
         }
 
-        function openTrayPickerModal(mode, kilnId, remainingTrays) {
+        function openTrayPickerModal(mode, kilnId, remainingTrays, kilnStatus) {
+            if (mode === 'load') {
+                const normalized = String(kilnStatus || '').toLowerCase();
+                if (normalized && normalized !== 'empty' && normalized !== 'loading') {
+                    alert(`{{ texts.kiln_load_blocked_status }}`.replace('{status}', normalized));
+                    return;
+                }
+            }
+            if (mode === 'unload') {
+                const normalized = String(kilnStatus || '').toLowerCase();
+                if (normalized && normalized !== 'ready' && normalized !== 'unloading') {
+                    alert(`{{ texts.kiln_unload_blocked_status }}`.replace('{status}', normalized));
+                    return;
+                }
+            }
             if (mode === 'load') {
                 const sortInput = document.getElementById('sort_trays_input');
                 if ((parseInt((sortInput && sortInput.value) || '0', 10) || 0) <= 0) {
@@ -1345,6 +1619,7 @@
                 confirmHidden.value = '0';
             }
             hidden.value = entries.map(e => `${e.id}#${e.spec}#${e.pcs}#${e.grade}#${Number(e.kg || 0).toFixed(2)}`).join(', ');
+            if (!lockStageSubmit(form, 'submit_secondary_products')) return;
             form.submit();
         }
 
@@ -2606,6 +2881,32 @@
         if (secondaryWasteInputEl) {
             secondaryWasteInputEl.addEventListener('input', refreshFlowMissingReminders);
             secondaryWasteInputEl.addEventListener('blur', refreshFlowMissingReminders);
+        }
+        const entryReminderCloseBtn = document.getElementById('entry-reminder-float-close');
+        if (entryReminderCloseBtn) {
+            entryReminderCloseBtn.addEventListener('click', () => {
+                const hourNow = (new Date()).getHours();
+                if (hourNow >= 17) return;
+                entryReminderSoftClosed = true;
+                const floatCard = document.getElementById('entry-reminder-float');
+                if (floatCard) {
+                    floatCard.classList.remove('show');
+                    window.setTimeout(() => {
+                        if (!floatCard.classList.contains('show')) floatCard.style.display = 'none';
+                    }, 260);
+                }
+            });
+        }
+        const entryReminderListEl = document.getElementById('entry-reminder-float-list');
+        if (entryReminderListEl) {
+            entryReminderListEl.addEventListener('click', (event) => {
+                const btn = event.target && event.target.closest ? event.target.closest('.entry-reminder-link') : null;
+                if (!btn) return;
+                event.preventDefault();
+                const key = btn.getAttribute('data-reminder-key') || '';
+                parkReminderFloatDuringJump();
+                jumpToReminderTarget(key);
+            });
         }
         refreshFlowMissingReminders();
         refreshEntryReminderStrip();

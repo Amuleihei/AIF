@@ -1,15 +1,18 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
+import io
 from datetime import datetime
 from urllib import request as urllib_request
 from urllib.parse import parse_qsl
 
-from flask import request, render_template_string, jsonify, redirect, url_for, flash
+from flask import request, render_template_string, jsonify, redirect, url_for, flash, get_flashed_messages, Response
 from flask_login import login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash
+from openpyxl import Workbook
 
 from web.forms import LoginForm
 from tg_bot.config import get_bot_token
@@ -25,15 +28,20 @@ from web.templates_admin import (
     ADMIN_ALERT_CENTER_TEMPLATE,
     ADMIN_HR_SETTINGS_TEMPLATE,
     ADMIN_HR_EMPLOYEES_TEMPLATE,
+    ADMIN_HR_ATTENDANCE_TEMPLATE,
 )
 from modules.hr.hr_engine import (
     add_hr_attendance_from_admin,
+    add_hr_special_task_from_admin,
     apply_hr_attendance_batch_from_admin,
     add_hr_employee_from_admin,
+    get_hr_attendance_records,
     get_hr_admin_payload,
     get_hr_employees_payload,
+    get_hr_payroll_preview,
     save_hr_admin_settings,
     update_hr_employee_from_admin,
+    update_hr_employee_status_from_admin,
 )
 from web.services.alert_settings_service import get_alert_settings, save_alert_settings
 from web.services.alert_center_service import (
@@ -44,6 +52,9 @@ from web.services.alert_center_service import (
     update_alert_event,
 )
 from web.services.period_report_service import get_period_report_links
+from web.services.tg_login_token_service import verify_tg_login_token
+
+logger = logging.getLogger("aif.web")
 
 
 def _verify_tg_init_data(init_data: str, bot_token: str, max_age_seconds: int = 6 * 3600) -> dict | None:
@@ -176,9 +187,30 @@ def register_auth_admin_routes(app, translate):
             except Exception:
                 pass
 
+    def _redirect_with_lang(endpoint: str):
+        return redirect(url_for(endpoint, lang=get_lang()), code=303)
+
+    def _pull_page_messages() -> tuple[str, str]:
+        result_msg = ""
+        error_msg = ""
+        for category, message in get_flashed_messages(with_categories=True):
+            text = str(message or "").strip()
+            if not text:
+                continue
+            if category in ("error", "danger"):
+                if not error_msg:
+                    error_msg = text
+            else:
+                if not result_msg:
+                    result_msg = text
+        return result_msg, error_msg
+
     def _can_access_hr_employees() -> bool:
         role = str(getattr(current_user, "role", "") or "").strip().lower()
         return bool(current_user.has_permission("admin") or role in ("finance", "stats"))
+
+    def _can_access_hr_attendance() -> bool:
+        return _can_access_hr_employees()
 
     def _localize_hr_option(value: str, kind: str, lang: str) -> str:
         raw = str(value or "").strip()
@@ -197,20 +229,28 @@ def register_auth_admin_routes(app, translate):
                 "药浸&烘干组": "dip_kiln_team",
                 "dip & kiln team": "dip_kiln_team",
                 "dip and kiln team": "dip_kiln_team",
+                "treatment & kiln team": "dip_kiln_team",
                 "采购组": "procurement_team",
                 "procurement team": "procurement_team",
                 "设备保障": "maintenance_team",
                 "maintenance": "maintenance_team",
+                "maintenance team": "maintenance_team",
+                "maintenance & utilities": "maintenance_team",
                 "安保组": "security_team",
                 "security team": "security_team",
                 "窑工组": "kiln_team",
                 "kiln team": "kiln_team",
                 "拣选组": "sorting_team",
                 "sorting team": "sorting_team",
+                "sorting & grading": "sorting_team",
                 "物流组": "logistics_team",
                 "logistics team": "logistics_team",
+                "搬运组": "material_handling_team",
+                "material handling": "material_handling_team",
+                "material handling team": "material_handling_team",
                 "未分组": "unassigned_team",
                 "unassigned": "unassigned_team",
+                "unassigned team": "unassigned_team",
             },
             "position": {
                 "财务": "finance",
@@ -222,6 +262,7 @@ def register_auth_admin_routes(app, translate):
                 "manager": "manager",
                 "锯工": "sawyer",
                 "sawyer": "sawyer",
+                "saw operator": "sawyer",
                 "窑工": "kiln_operator",
                 "kiln operator": "kiln_operator",
                 "拣选": "sorter",
@@ -230,28 +271,47 @@ def register_auth_admin_routes(app, translate):
                 "shipper": "shipper",
                 "仓管": "warehouse_keeper",
                 "warehouse keeper": "warehouse_keeper",
+                "warehouse coordinator": "warehouse_keeper",
                 "副锯工": "assistant_sawyer",
                 "assistant sawyer": "assistant_sawyer",
                 "锯工qc": "saw_qc",
+                "锯工qc检验": "saw_qc",
                 "saw qc": "saw_qc",
+                "sawing qc": "saw_qc",
+                "sawing qc inspector": "saw_qc",
                 "药浸烘干控制(同岗)": "dip_kiln_controller",
+                "药浸烘干控制": "dip_kiln_controller",
                 "dip kiln controller": "dip_kiln_controller",
+                "dip & kiln controller": "dip_kiln_controller",
                 "锅炉工": "boiler_operator",
                 "boiler operator": "boiler_operator",
                 "拣选qc": "sorting_qc",
                 "sorting qc": "sorting_qc",
+                "sorting qc inspector": "sorting_qc",
                 "拣选员": "sorting_worker",
                 "sorting worker": "sorting_worker",
+                "sorting operator": "sorting_worker",
+                "干料拣选员": "dry_sorting_worker",
+                "dry sorting worker": "dry_sorting_worker",
+                "湿料拣选员": "wet_sorting_worker",
+                "wet sorting worker": "wet_sorting_worker",
                 "二选修正人员": "secondary_sort_rework",
                 "secondary sort rework": "secondary_sort_rework",
+                "secondary sorting rework": "secondary_sort_rework",
                 "采购兼司机": "buyer_driver",
                 "buyer driver": "buyer_driver",
+                "buyer/driver": "buyer_driver",
                 "电工": "electrician",
                 "electrician": "electrician",
                 "叉车司机": "forklift_driver",
                 "forklift driver": "forklift_driver",
+                "forklift operator": "forklift_driver",
                 "保安": "security_guard",
                 "security guard": "security_guard",
+                "搬木工": "loader",
+                "loader": "loader",
+                "打包工": "packer",
+                "packer": "packer",
                 "未设置": "unset_position",
                 "unassigned position": "unset_position",
             },
@@ -278,6 +338,7 @@ def register_auth_admin_routes(app, translate):
                 "kiln_team": "hr_team_kiln_team",
                 "sorting_team": "hr_team_sorting_team",
                 "logistics_team": "hr_team_logistics_team",
+                "material_handling_team": "hr_team_material_handling_team",
                 "unassigned_team": "hr_team_unassigned_team",
             },
             "position": {
@@ -300,6 +361,10 @@ def register_auth_admin_routes(app, translate):
                 "electrician": "hr_position_electrician",
                 "forklift_driver": "hr_position_forklift_driver",
                 "security_guard": "hr_position_security_guard",
+                "dry_sorting_worker": "hr_position_dry_sorting_worker",
+                "wet_sorting_worker": "hr_position_wet_sorting_worker",
+                "loader": "hr_position_loader",
+                "packer": "hr_position_packer",
                 "unset_position": "hr_position_unset_position",
             },
             "salary_type": {
@@ -341,6 +406,76 @@ def register_auth_admin_routes(app, translate):
         payload["salary_type_label_map"] = {
             str(x.get("value", "") or ""): str(x.get("label", "") or "") for x in salary_type_choices
         }
+        rows = payload.get("rows", []) if isinstance(payload.get("rows"), list) else []
+        localized_rows: list[dict] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            item = dict(row)
+            team_v = str(item.get("team", "") or "")
+            position_v = str(item.get("position", "") or "")
+            salary_type_v = str(item.get("salary_type", "") or "")
+            item["team_label"] = _localize_hr_option(team_v, "team", lang)
+            item["position_label"] = _localize_hr_option(position_v, "position", lang)
+            item["salary_type_label"] = _localize_hr_option(salary_type_v, "salary_type", lang)
+            localized_rows.append(item)
+        payload["rows"] = localized_rows
+        grouped_map: dict[str, dict] = {}
+        ordered_team_values = [str(x.get("value", "") or "") for x in team_choices if str(x.get("value", "") or "")]
+        for tv in ordered_team_values:
+            grouped_map[tv] = {
+                "team_value": tv,
+                "team_label": payload["team_label_map"].get(tv, tv),
+                "rows": [],
+            }
+        for item in localized_rows:
+            team_v = str(item.get("team", "") or "").strip()
+            key = team_v if team_v else "__unassigned__"
+            if key not in grouped_map:
+                label = payload["team_label_map"].get(team_v, "") if team_v else ""
+                if not label:
+                    label = _localize_hr_option("未分组", "team", lang)
+                grouped_map[key] = {
+                    "team_value": team_v,
+                    "team_label": label or team_v or _localize_hr_option("未分组", "team", lang),
+                    "rows": [],
+                }
+            grouped_map[key]["rows"].append(item)
+
+        groups: list[dict] = []
+        for tv in ordered_team_values:
+            g = grouped_map.get(tv)
+            if isinstance(g, dict) and isinstance(g.get("rows"), list) and g["rows"]:
+                groups.append(g)
+        for key, g in grouped_map.items():
+            if key in ordered_team_values:
+                continue
+            if isinstance(g, dict) and isinstance(g.get("rows"), list) and g["rows"]:
+                groups.append(g)
+        active_groups: list[dict] = []
+        left_rows: list[dict] = []
+        for g in groups:
+            if not isinstance(g, dict):
+                continue
+            g_rows = g.get("rows", []) if isinstance(g.get("rows"), list) else []
+            active_rows = []
+            for r in g_rows:
+                if not isinstance(r, dict):
+                    continue
+                if str(r.get("status", "") or "") == "离职":
+                    left_rows.append(r)
+                else:
+                    active_rows.append(r)
+            if active_rows:
+                active_groups.append(
+                    {
+                        "team_value": g.get("team_value", ""),
+                        "team_label": g.get("team_label", ""),
+                        "rows": active_rows,
+                    }
+                )
+        payload["grouped_rows"] = active_groups
+        payload["left_rows"] = left_rows
         return payload
 
     @app.route("/admin/users")
@@ -471,7 +606,7 @@ def register_auth_admin_routes(app, translate):
             flash(translate("no_admin_perm"), "error")
             return redirect(url_for("index"))
 
-        result_msg = ""
+        result_msg, error_msg = _pull_page_messages()
         if request.method == "POST":
             payload = {
                 "log_stock_mt_min": request.form.get("log_stock_mt_min"),
@@ -493,13 +628,14 @@ def register_auth_admin_routes(app, translate):
                     f"kiln_max_trays={saved.get('kiln_max_trays')}"
                 ),
             )
-            result_msg = "✅ 预警值已保存并生效"
+            flash("✅ 预警值已保存并生效", "success")
+            return _redirect_with_lang("admin_alert_settings")
 
         settings = get_alert_settings()
         return render_template_string(
             ADMIN_ALERT_SETTINGS_TEMPLATE,
             settings=settings,
-            result_msg=result_msg,
+            result_msg=result_msg or error_msg,
         )
 
     @app.route("/admin/alert-center", methods=["GET", "POST"])
@@ -509,7 +645,7 @@ def register_auth_admin_routes(app, translate):
             flash(translate("no_admin_perm"), "error")
             return redirect(url_for("index"))
 
-        result_msg = ""
+        result_msg, error_msg = _pull_page_messages()
         if request.method == "POST":
             form_type = str(request.form.get("form_type", "") or "").strip()
             if form_type == "engine_cfg":
@@ -553,7 +689,7 @@ def register_auth_admin_routes(app, translate):
                         f"kiln_shrink={saved.get('kiln_green_to_dry_shrinkage_pct')}"
                     ),
                 )
-                result_msg = "✅ 预警引擎参数已保存"
+                flash("✅ 预警引擎参数已保存", "success")
             elif form_type == "silence":
                 try:
                     minutes = int(float(request.form.get("silence_minutes", "0") or 0))
@@ -561,12 +697,21 @@ def register_auth_admin_routes(app, translate):
                     minutes = 0
                 until_ts = set_alert_silence(minutes, operator=str(getattr(current_user, "username", "") or ""))
                 _audit("set_alert_silence", target="alert_engine", detail=f"minutes={minutes},until={until_ts}")
-                result_msg = "✅ 通知静默已更新"
+                flash("✅ 通知静默已更新", "success")
+            else:
+                flash("❌ 未知提交类型", "error")
+            return _redirect_with_lang("admin_alert_center")
 
         lang = get_lang()
         texts = LANGUAGES.get(lang, LANGUAGES["zh"])
         data = get_alert_center_payload(lang=lang)
-        return render_template_string(ADMIN_ALERT_CENTER_TEMPLATE, data=data, result_msg=result_msg, texts=texts, lang=lang)
+        return render_template_string(
+            ADMIN_ALERT_CENTER_TEMPLATE,
+            data=data,
+            result_msg=result_msg or error_msg,
+            texts=texts,
+            lang=lang,
+        )
 
     @app.route("/admin/alert-center/action", methods=["POST"])
     @login_required
@@ -601,8 +746,7 @@ def register_auth_admin_routes(app, translate):
 
         lang = get_lang()
         texts = LANGUAGES.get(lang, LANGUAGES["zh"])
-        result_msg = ""
-        error_msg = ""
+        result_msg, error_msg = _pull_page_messages()
         data = get_hr_admin_payload()
         if request.method == "POST":
             teams_json = request.form.get("teams_json", "")
@@ -617,6 +761,12 @@ def register_auth_admin_routes(app, translate):
             salary_descs = request.form.getlist("salary_desc")
             overtime_multipliers = request.form.getlist("ot_multiplier_option")
             default_overtime_multiplier = request.form.get("ot_default_multiplier", "")
+            saw_piecework_enabled = request.form.get("saw_piecework_enabled", "")
+            saw_default_unit_price = request.form.get("saw_default_unit_price", "")
+            saw_bind_machine_no = request.form.getlist("saw_bind_machine_no")
+            saw_bind_primary_name = request.form.getlist("saw_bind_primary_name")
+            saw_bind_assistant_name = request.form.getlist("saw_bind_assistant_name")
+            saw_bind_unit_price = request.form.getlist("saw_bind_unit_price")
             ok, msg, payload = save_hr_admin_settings(
                 teams_json=teams_json,
                 salary_types_json=salary_types_json,
@@ -630,10 +780,16 @@ def register_auth_admin_routes(app, translate):
                 salary_descs=salary_descs,
                 overtime_multipliers=overtime_multipliers,
                 default_overtime_multiplier=default_overtime_multiplier,
+                saw_piecework_enabled=saw_piecework_enabled,
+                saw_default_unit_price=saw_default_unit_price,
+                saw_bind_machine_no=saw_bind_machine_no,
+                saw_bind_primary_name=saw_bind_primary_name,
+                saw_bind_assistant_name=saw_bind_assistant_name,
+                saw_bind_unit_price=saw_bind_unit_price,
             )
             data = payload
             if ok:
-                result_msg = msg
+                flash(msg, "success")
                 org_data = (data.get("org", {}) or {}) if isinstance(data, dict) else {}
                 attendance_cfg = (org_data.get("attendance", {}) or {}) if isinstance(org_data, dict) else {}
                 _audit(
@@ -646,7 +802,8 @@ def register_auth_admin_routes(app, translate):
                     ),
                 )
             else:
-                error_msg = msg
+                flash(msg, "error")
+            return _redirect_with_lang("admin_hr_settings")
         return render_template_string(
             ADMIN_HR_SETTINGS_TEMPLATE,
             data=data,
@@ -665,8 +822,7 @@ def register_auth_admin_routes(app, translate):
 
         lang = get_lang()
         texts = LANGUAGES.get(lang, LANGUAGES["zh"])
-        result_msg = ""
-        error_msg = ""
+        result_msg, error_msg = _pull_page_messages()
         data = _attach_hr_choice_labels(get_hr_employees_payload(), lang)
         if request.method == "POST":
             form_action = str(request.form.get("form_action", "add") or "add").strip()
@@ -680,7 +836,167 @@ def register_auth_admin_routes(app, translate):
                     join_date=request.form.get("join_date", ""),
                     status=request.form.get("status", ""),
                 )
-            elif form_action == "attendance":
+            elif form_action == "update_status":
+                ok, msg, payload = update_hr_employee_status_from_admin(
+                    original_name=request.form.get("original_name", ""),
+                    status=request.form.get("status", ""),
+                )
+            else:
+                ok, msg, payload = add_hr_employee_from_admin(
+                    name=request.form.get("name", ""),
+                    team=request.form.get("team", ""),
+                    position=request.form.get("position", ""),
+                    salary_type=request.form.get("salary_type", ""),
+                    salary_value=request.form.get("salary_value", ""),
+                    join_date=request.form.get("join_date", ""),
+                )
+            data = _attach_hr_choice_labels(payload, lang)
+            if ok:
+                flash(msg, "success")
+                if form_action == "edit":
+                    _audit(
+                        "update_hr_employee",
+                        target=str(request.form.get("original_name", "") or ""),
+                        detail=(
+                            f"team={request.form.get('team','')},"
+                            f"position={request.form.get('position','')},"
+                            f"salary_type={request.form.get('salary_type','')},"
+                            f"status={request.form.get('status','')}"
+                        ),
+                    )
+                elif form_action == "update_status":
+                    _audit(
+                        "update_hr_employee_status",
+                        target=str(request.form.get("original_name", "") or ""),
+                        detail=f"status={request.form.get('status','')}",
+                    )
+                else:
+                    _audit(
+                        "add_hr_employee",
+                        target=str(request.form.get("name", "") or ""),
+                        detail=(
+                            f"team={request.form.get('team','')},"
+                            f"position={request.form.get('position','')},"
+                            f"salary_type={request.form.get('salary_type','')}"
+                        ),
+                    )
+            else:
+                flash(msg, "error")
+            return _redirect_with_lang("admin_hr_employees")
+        return render_template_string(
+            ADMIN_HR_EMPLOYEES_TEMPLATE,
+            data=data,
+            result_msg=result_msg,
+            error_msg=error_msg,
+            lang=lang,
+            texts=texts,
+            can_manage_hr_settings=bool(current_user.has_permission("admin")),
+            can_access_hr_attendance=_can_access_hr_attendance(),
+            hr_back_url=url_for("admin_root") if current_user.has_permission("admin") else url_for("index"),
+        )
+
+    @app.route("/admin/hr-attendance", methods=["GET", "POST"])
+    @login_required
+    def admin_hr_attendance():
+        if not _can_access_hr_attendance():
+            flash(translate("no_perm"), "error")
+            return redirect(url_for("index"))
+
+        lang = get_lang()
+        texts = LANGUAGES.get(lang, LANGUAGES["zh"])
+        q_from = str(request.args.get("attendance_from", "") or "").strip()
+        q_to = str(request.args.get("attendance_to", "") or "").strip()
+        q_name = str(request.args.get("attendance_name", "") or "").strip()
+        payroll_asof = str(request.args.get("payroll_asof", "") or "").strip()
+        payroll_name = str(request.args.get("payroll_name", "") or "").strip()
+        export_action = str(request.args.get("action", "") or "").strip().lower()
+        result_msg, error_msg = _pull_page_messages()
+        data = _attach_hr_choice_labels(get_hr_employees_payload(), lang)
+        attendance_view_rows = get_hr_attendance_records(
+            day_from=q_from,
+            day_to=q_to,
+            name=q_name,
+            limit=2000 if export_action == "export_attendance" else 200,
+        )
+        payroll_preview = get_hr_payroll_preview(asof=payroll_asof, name=payroll_name)
+        data["attendance_view_rows"] = attendance_view_rows
+        data["attendance_filter_from"] = q_from
+        data["attendance_filter_to"] = q_to
+        data["attendance_filter_name"] = q_name
+        data["payroll_asof"] = payroll_preview.get("asof", "")
+        data["payroll_name"] = payroll_name
+        data["payroll_rows"] = payroll_preview.get("rows", [])
+        data["payroll_total_net"] = payroll_preview.get("total_net", 0.0)
+        if export_action in ("export_attendance", "export_attendance_excel", "export_payroll_excel"):
+            if not bool(current_user.has_permission("export") or current_user.has_permission("admin")):
+                flash("❌ 无导出权限", "error")
+                return _redirect_with_lang("admin_hr_attendance")
+            wb = Workbook()
+            ws = wb.active
+            if export_action in ("export_attendance", "export_attendance_excel"):
+                ws.title = "attendance"
+                ws.append(["date", "name", "regular_hours", "overtime_hours", "overtime_multiplier", "source"])
+                for row in attendance_view_rows:
+                    ws.append(
+                        [
+                            str(row.get("date", "") or ""),
+                            str(row.get("name", "") or ""),
+                            float(row.get("regular_hours", 0.0) or 0.0),
+                            float(row.get("overtime_hours", 0.0) or 0.0),
+                            float(row.get("overtime_multiplier", 1.5) or 1.5),
+                            str(row.get("source", "") or ""),
+                        ]
+                    )
+                filename = f"hr_attendance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            else:
+                ws.title = "payroll"
+                ws.append(
+                    [
+                        "name",
+                        "salary_type",
+                        "period",
+                        "regular_hours",
+                        "overtime_hours",
+                        "piece_qty_total",
+                        "base",
+                        "overtime_pay",
+                        "reward",
+                        "penalty",
+                        "net",
+                    ]
+                )
+                for row in (payroll_preview.get("rows", []) if isinstance(payroll_preview, dict) else []):
+                    if not isinstance(row, dict):
+                        continue
+                    ws.append(
+                        [
+                            str(row.get("name", "") or ""),
+                            str(row.get("salary_type", "") or ""),
+                            str(row.get("period", "") or ""),
+                            float(row.get("regular_hours", 0.0) or 0.0),
+                            float(row.get("overtime_hours", 0.0) or 0.0),
+                            float(row.get("piece_qty_total", 0.0) or 0.0),
+                            float(row.get("base", 0.0) or 0.0),
+                            float(row.get("overtime_pay", 0.0) or 0.0),
+                            float(row.get("reward", 0.0) or 0.0),
+                            float(row.get("penalty", 0.0) or 0.0),
+                            float(row.get("net", 0.0) or 0.0),
+                        ]
+                    )
+                ws.append([])
+                ws.append(["total_net", float(payroll_preview.get("total_net", 0.0) or 0.0)])
+                filename = f"hr_payroll_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            bio = io.BytesIO()
+            wb.save(bio)
+            bio.seek(0)
+            return Response(
+                bio.getvalue(),
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        if request.method == "POST":
+            form_action = str(request.form.get("form_action", "") or "").strip()
+            if form_action == "attendance":
                 ok, msg, payload = add_hr_attendance_from_admin(
                     name=request.form.get("attendance_name", ""),
                     regular_hours=request.form.get("regular_hours", ""),
@@ -706,30 +1022,22 @@ def register_auth_admin_routes(app, translate):
                     overtime_multiplier=request.form.get("attendance_ot_multiplier", ""),
                     special_hours=request.form.get("attendance_special_hours", ""),
                 )
-            else:
-                ok, msg, payload = add_hr_employee_from_admin(
-                    name=request.form.get("name", ""),
-                    team=request.form.get("team", ""),
-                    position=request.form.get("position", ""),
-                    salary_type=request.form.get("salary_type", ""),
-                    salary_value=request.form.get("salary_value", ""),
-                    join_date=request.form.get("join_date", ""),
+            elif form_action == "special_task":
+                ok, msg, payload = add_hr_special_task_from_admin(
+                    name=request.form.get("special_task_name", ""),
+                    team=request.form.get("special_task_team", ""),
+                    task_name=request.form.get("special_task_title", ""),
+                    quantity=request.form.get("special_task_qty", ""),
+                    unit_price=request.form.get("special_task_unit_price", ""),
+                    day=request.form.get("special_task_date", ""),
+                    note=request.form.get("special_task_note", ""),
                 )
+            else:
+                ok, msg, payload = False, "❌ 未知提交类型", get_hr_employees_payload()
             data = _attach_hr_choice_labels(payload, lang)
             if ok:
-                result_msg = msg
-                if form_action == "edit":
-                    _audit(
-                        "update_hr_employee",
-                        target=str(request.form.get("original_name", "") or ""),
-                        detail=(
-                            f"team={request.form.get('team','')},"
-                            f"position={request.form.get('position','')},"
-                            f"salary_type={request.form.get('salary_type','')},"
-                            f"status={request.form.get('status','')}"
-                        ),
-                    )
-                elif form_action == "attendance":
+                flash(msg, "success")
+                if form_action == "attendance":
                     _audit(
                         "add_hr_attendance",
                         target=str(request.form.get("attendance_name", "") or ""),
@@ -752,20 +1060,26 @@ def register_auth_admin_routes(app, translate):
                             f"special_hours={request.form.get('attendance_special_hours','')}"
                         ),
                     )
-                else:
+                elif form_action == "special_task":
+                    task_emp = str(request.form.get("special_task_name", "") or "").strip()
+                    task_team = str(request.form.get("special_task_team", "") or "").strip()
+                    task_target = f"TEAM::{task_team}" if task_team else task_emp
                     _audit(
-                        "add_hr_employee",
-                        target=str(request.form.get("name", "") or ""),
+                        "add_hr_special_task_income",
+                        target=task_target,
                         detail=(
-                            f"team={request.form.get('team','')},"
-                            f"position={request.form.get('position','')},"
-                            f"salary_type={request.form.get('salary_type','')}"
+                            f"task={request.form.get('special_task_title','')},"
+                            f"qty={request.form.get('special_task_qty','')},"
+                            f"unit_price={request.form.get('special_task_unit_price','')},"
+                            f"date={request.form.get('special_task_date','')},"
+                            f"team={task_team}"
                         ),
                     )
             else:
-                error_msg = msg
+                flash(msg, "error")
+            return _redirect_with_lang("admin_hr_attendance")
         return render_template_string(
-            ADMIN_HR_EMPLOYEES_TEMPLATE,
+            ADMIN_HR_ATTENDANCE_TEMPLATE,
             data=data,
             result_msg=result_msg,
             error_msg=error_msg,
@@ -973,7 +1287,29 @@ def register_auth_admin_routes(app, translate):
 
     @app.route("/tg/mini")
     def tg_mini():
-        # 中文注释：MiniApp 启动页，前端 JS 读取 initData 并换取 Web 会话。
+        # 中文注释：优先走 TG 登录 token 直登；失败则进入常规登录页。
+        token = str(request.args.get("tg_login_token", "") or "").strip()
+        if token:
+            checked = verify_tg_login_token(token)
+            if bool(checked.get("ok")):
+                uid = str(checked.get("uid") or "").strip()
+                session = Session()
+                try:
+                    role_row = session.query(TgUserRole).filter_by(user_id=uid).first()
+                    role = str(role_row.role or "") if role_row else ""
+                    if role in ("管理员", "老板"):
+                        web_user = _get_or_create_web_user_for_role(session, role, uid)
+                        login_user(web_user)
+                        logger.info("tg_mini_token_login_ok uid=%s role=%s user=%s", uid, role, web_user.username)
+                        return redirect(url_for("index"))
+                    logger.info("tg_mini_token_forbidden uid=%s role=%s", uid, role or "none")
+                finally:
+                    session.close()
+            else:
+                logger.info("tg_mini_token_invalid reason=%s", str(checked.get("reason") or "unknown"))
+            return redirect(url_for("login"))
+
+        # 兼容 WebApp 直开：前端 JS 读取 initData 并换取 Web 会话。
         bot_username = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
         tg_reopen_url = f"https://t.me/{bot_username}?startapp=home" if bot_username else ""
         return render_template_string(
@@ -984,6 +1320,7 @@ def register_auth_admin_routes(app, translate):
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>AIF MiniApp</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f7fb; color: #1f2937; }
@@ -1002,6 +1339,14 @@ def register_auth_admin_routes(app, translate):
     </div>
   </div>
   <script>
+    const reopenUrl = "{{ tg_reopen_url }}";
+
+    function showReopenAction() {
+      if (!reopenUrl) return;
+      document.getElementById("open-tg-btn").onclick = function () { openBotChat(reopenUrl); };
+      document.getElementById("actions").style.display = "block";
+    }
+
     function openBotChat(url) {
       const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
       try {
@@ -1016,18 +1361,15 @@ def register_auth_admin_routes(app, translate):
     (async function () {
       try {
         const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-        if (!tg) throw new Error("未检测到 Telegram WebApp 环境");
+        if (!tg) {
+          window.location.replace("/login");
+          return;
+        }
         tg.ready();
         if (tg.expand) tg.expand();
         const initData = tg.initData || "";
         if (!initData) {
-          const msg = "Telegram initData 为空，请从机器人按钮进入";
-          document.getElementById("msg").textContent = msg;
-          const reopenUrl = "{{ tg_reopen_url }}";
-          if (reopenUrl) {
-            document.getElementById("open-tg-btn").onclick = function () { openBotChat(reopenUrl); };
-            document.getElementById("actions").style.display = "block";
-          }
+          window.location.replace("/login");
           return;
         }
         const res = await fetch("/tg/auth", {
@@ -1039,7 +1381,7 @@ def register_auth_admin_routes(app, translate):
         if (!res.ok || !data.ok) throw new Error(data.error || "登录失败");
         window.location.replace("/");
       } catch (e) {
-        document.getElementById("msg").textContent = e.message || String(e);
+        window.location.replace("/login");
       }
     })();
   </script>
@@ -1054,17 +1396,21 @@ def register_auth_admin_routes(app, translate):
     def tg_auth():
         payload = request.get_json(silent=True) or {}
         init_data = str(payload.get("init_data", "") or "").strip()
+        client_ip = _client_ip()
         try:
             bot_token = get_bot_token()
         except Exception:
+            logger.warning("tg_auth_missing_bot_token ip=%s", client_ip)
             return jsonify({"ok": False, "error": "BOT_TOKEN 未配置"}), 500
 
         user = _verify_tg_init_data(init_data, bot_token)
         if not user:
+            logger.warning("tg_auth_verify_failed ip=%s init_data_len=%s", client_ip, len(init_data))
             return jsonify({"ok": False, "error": "Telegram 验签失败或数据过期"}), 401
 
         uid = str(user.get("id", "") or "").strip()
         if not uid:
+            logger.warning("tg_auth_missing_uid ip=%s", client_ip)
             return jsonify({"ok": False, "error": "缺少 Telegram 用户ID"}), 400
 
         session = Session()
@@ -1072,10 +1418,12 @@ def register_auth_admin_routes(app, translate):
             role_row = session.query(TgUserRole).filter_by(user_id=uid).first()
             role = str(role_row.role or "") if role_row else ""
             if role not in ("管理员", "老板"):
+                logger.info("tg_auth_forbidden uid=%s role=%s ip=%s", uid, role or "none", client_ip)
                 return jsonify({"ok": False, "error": "仅管理员/老板可访问 MiniApp"}), 403
 
             web_user = _get_or_create_web_user_for_role(session, role, uid)
             login_user(web_user)
+            logger.info("tg_auth_ok uid=%s role=%s web_user=%s ip=%s", uid, role, web_user.username, client_ip)
             return jsonify({"ok": True, "role": role, "username": web_user.username})
         finally:
             session.close()

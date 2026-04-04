@@ -5,6 +5,7 @@ BOSS_H5_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ texts.title }} - {{ texts.boss }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <style>
         :root {
             --bg: #f3f6fb;

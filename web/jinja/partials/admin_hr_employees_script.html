@@ -2,12 +2,144 @@
         var teamPositionsMap = {{ data.team_positions_map | tojson }};
         var positionLabelMap = {{ data.position_label_map | tojson }};
         var selectedAttendanceNames = [];
+        var attendanceSubmitting = false;
+
+        function lockFormSubmit(form) {
+            if (!form) return true;
+            if (form.dataset.submitting === '1') return true;
+            form.dataset.submitting = '1';
+            var submitButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+            submitButtons.forEach(function(btn) {
+                btn.disabled = true;
+                if (btn.tagName === 'BUTTON') {
+                    btn.dataset.originalText = btn.textContent;
+                    btn.textContent = '{{ texts.get("saving_label", "保存中...") }}';
+                }
+            });
+            return false;
+        }
+
+        function openAddEmployeeModal() {
+            closeEditForm();
+            closeSpecialTaskModal();
+            var modal = document.getElementById('add-employee-modal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+            var nameEl = document.getElementById('add-employee-name');
+            if (nameEl) {
+                setTimeout(function() { nameEl.focus(); }, 0);
+            }
+        }
+
+        function closeAddEmployeeModal() {
+            var modal = document.getElementById('add-employee-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function handleAddEmployeeBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closeAddEmployeeModal();
+        }
+
+        function openSpecialTaskModal() {
+            closeEditForm();
+            closeAddEmployeeModal();
+            closeLeftEmployeesModal();
+            var modal = document.getElementById('special-task-modal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+            var nameEl = document.getElementById('special-task-name');
+            if (nameEl) {
+                setTimeout(function() { nameEl.focus(); }, 0);
+            }
+        }
+
+        function closeSpecialTaskModal() {
+            var modal = document.getElementById('special-task-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function handleSpecialTaskBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closeSpecialTaskModal();
+        }
+
+        function openAttendanceViewModal() {
+            closeLeftEmployeesModal();
+            var modal = document.getElementById('attendance-view-modal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeAttendanceViewModal() {
+            var modal = document.getElementById('attendance-view-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function handleAttendanceViewBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closeAttendanceViewModal();
+        }
+
+        function openPayrollViewModal() {
+            closeLeftEmployeesModal();
+            var modal = document.getElementById('payroll-view-modal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closePayrollViewModal() {
+            var modal = document.getElementById('payroll-view-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function handlePayrollViewBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closePayrollViewModal();
+        }
 
         function toggleAddForm() {
-            var box = document.getElementById('add-form');
-            if (!box) return;
+            var modal = document.getElementById('add-employee-modal');
+            if (!modal) return;
+            if (modal.classList.contains('show')) {
+                closeAddEmployeeModal();
+                return;
+            }
+            openAddEmployeeModal();
+        }
+
+        function openLeftEmployeesModal() {
             closeEditForm();
-            box.style.display = box.style.display === 'block' ? 'none' : 'block';
+            closeAddEmployeeModal();
+            closeSpecialTaskModal();
+            var modal = document.getElementById('left-employees-modal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeLeftEmployeesModal() {
+            var modal = document.getElementById('left-employees-modal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+
+        function handleLeftEmployeesBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closeLeftEmployeesModal();
         }
 
         function refreshPositionOptionsByIds(teamId, posId) {
@@ -45,10 +177,10 @@
         }
 
         function openEditForm(row) {
-            var box = document.getElementById('edit-form');
+            var box = document.getElementById('edit-employee-modal');
             if (!box || !row) return;
-            var addBox = document.getElementById('add-form');
-            if (addBox) addBox.style.display = 'none';
+            closeAddEmployeeModal();
+            closeSpecialTaskModal();
 
             document.getElementById('edit-original-name').value = row.name || '';
             document.getElementById('edit-name').value = row.name || '';
@@ -59,14 +191,20 @@
             document.getElementById('edit-salary-value').value = (row.salary_value || 0);
             document.getElementById('edit-join-date').value = row.join_date || '';
             document.getElementById('edit-status-select').value = row.status || '在岗';
-            box.style.display = 'block';
-            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            box.classList.add('show');
+            box.setAttribute('aria-hidden', 'false');
         }
 
         function closeEditForm() {
-            var box = document.getElementById('edit-form');
+            var box = document.getElementById('edit-employee-modal');
             if (!box) return;
-            box.style.display = 'none';
+            box.classList.remove('show');
+            box.setAttribute('aria-hidden', 'true');
+        }
+
+        function handleEditEmployeeBackdropClick(evt) {
+            if (!evt || evt.target !== evt.currentTarget) return;
+            closeEditForm();
         }
 
         function renderSelectedCount() {
@@ -83,6 +221,7 @@
 
         function toggleEmpCard(card, evt) {
             if (!card) return;
+            if (card.style.display === 'none') return;
             var name = card.getAttribute('data-name') || '';
             if (!name) return;
             var modeEl = document.getElementById('select-mode');
@@ -103,10 +242,111 @@
             syncAttendanceHiddenFields();
         }
 
+        function applyEmpCardFilter() {
+            var filterEl = document.getElementById('card-status-filter');
+            var target = filterEl ? (filterEl.value || 'all') : 'all';
+            document.querySelectorAll('.emp-card').forEach(function(card) {
+                var status = card.getAttribute('data-att-status') || 'absent';
+                var show = (target === 'all' || status === target);
+                card.style.display = show ? '' : 'none';
+                if (!show) {
+                    card.classList.remove('selected');
+                    var name = card.getAttribute('data-name') || '';
+                    var idx = selectedAttendanceNames.indexOf(name);
+                    if (idx >= 0) selectedAttendanceNames.splice(idx, 1);
+                }
+            });
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        }
+
+        function selectAllVisibleEmpCards() {
+            var modeEl = document.getElementById('select-mode');
+            if (modeEl && modeEl.value === 'single') {
+                modeEl.value = 'multi';
+            }
+            document.querySelectorAll('.emp-card').forEach(function(card) {
+                if (card.style.display === 'none') return;
+                var name = card.getAttribute('data-name') || '';
+                if (!name) return;
+                if (selectedAttendanceNames.indexOf(name) < 0) {
+                    selectedAttendanceNames.push(name);
+                }
+                card.classList.add('selected');
+            });
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        }
+
+        function clearSelectedEmpCards() {
+            selectedAttendanceNames = [];
+            document.querySelectorAll('.emp-card.selected').forEach(function(card) {
+                card.classList.remove('selected');
+            });
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+        }
+
+        function oneClickAttendance() {
+            selectAllVisibleEmpCards();
+            submitAttendanceBatch('present');
+        }
+
+        function getEmpCardByName(name) {
+            var found = null;
+            document.querySelectorAll('.emp-card').forEach(function(card) {
+                if (found) return;
+                if ((card.getAttribute('data-name') || '') === (name || '')) {
+                    found = card;
+                }
+            });
+            return found;
+        }
+
         function submitAttendanceBatch(action) {
+            if (attendanceSubmitting) return;
             if (!selectedAttendanceNames.length) {
                 alert('{{ texts.get("hr_select_employee", "请选择员工") }}');
                 return;
+            }
+            if ((action || '') === 'special_off') {
+                var specialHoursEl = document.getElementById('attendance-special-hours');
+                var specialHours = specialHoursEl ? Number(specialHoursEl.value || 0) : 0;
+                if (!Number.isFinite(specialHours) || specialHours <= 0) {
+                    alert('{{ texts.get("hr_special_hours", "特殊工时（h）") }} > 0');
+                    return;
+                }
+            }
+            if ((action || '') === 'present') {
+                var skipNames = [];
+                selectedAttendanceNames.slice().forEach(function(name) {
+                    var card = getEmpCardByName(name);
+                    if (!card) return;
+                    var attStatus = card.getAttribute('data-att-status') || '';
+                    if (attStatus !== 'sick' && attStatus !== 'leave') return;
+                    var text = attStatus === 'sick'
+                        ? '{{ texts.get("hr_status_sick", "病假") }}'
+                        : '{{ texts.get("hr_status_leave", "休假") }}';
+                    var ok = confirm(name + ' {{ texts.get("hr_leave_confirm_prompt", "正在") }} ' + text + ' {{ texts.get("hr_leave_confirm_suffix", "确定要出勤吗？取消则跳过该员工。") }}');
+                    if (!ok) {
+                        skipNames.push(name);
+                    }
+                });
+                if (skipNames.length) {
+                    selectedAttendanceNames = selectedAttendanceNames.filter(function(n) {
+                        return skipNames.indexOf(n) < 0;
+                    });
+                    skipNames.forEach(function(name) {
+                        var c = getEmpCardByName(name);
+                        if (c) c.classList.remove('selected');
+                    });
+                    renderSelectedCount();
+                    syncAttendanceHiddenFields();
+                }
+                if (!selectedAttendanceNames.length) {
+                    alert('{{ texts.get("hr_no_selected_after_skip", "已全部跳过，本次未提交。") }}');
+                    return;
+                }
             }
             var actionEl = document.getElementById('attendance-batch-action');
             if (!actionEl) return;
@@ -116,6 +356,8 @@
             if (!formWrap) return;
             var form = formWrap.querySelector('form');
             if (!form) return;
+            if (lockFormSubmit(form)) return;
+            attendanceSubmitting = true;
             form.submit();
         }
 
@@ -134,6 +376,52 @@
                 });
                 refreshPositionOptionsByIds('edit-team-select', 'edit-position-select');
             }
+            var specialEmpEl = document.getElementById('special-task-name');
+            var specialTeamEl = document.getElementById('special-task-team');
+            if (specialEmpEl && specialTeamEl) {
+                specialEmpEl.addEventListener('change', function() {
+                    if ((specialEmpEl.value || '').trim()) {
+                        specialTeamEl.value = '';
+                    }
+                });
+                specialTeamEl.addEventListener('change', function() {
+                    if ((specialTeamEl.value || '').trim()) {
+                        specialEmpEl.value = '';
+                    }
+                });
+            }
+            var specialTaskForm = document.getElementById('special-task-form');
+            if (specialTaskForm && specialEmpEl && specialTeamEl) {
+                specialTaskForm.addEventListener('submit', function(evt) {
+                    var emp = (specialEmpEl.value || '').trim();
+                    var team = (specialTeamEl.value || '').trim();
+                    if (!emp && !team) {
+                        evt.preventDefault();
+                        alert('{{ texts.get("hr_special_task_target_hint", "可选员工或班组。若同时选择，优先按员工入账；若只选班组，则记为班组专项费用。") }}');
+                    }
+                });
+            }
+            var filterEl = document.getElementById('card-status-filter');
+            if (filterEl) {
+                filterEl.addEventListener('change', applyEmpCardFilter);
+                applyEmpCardFilter();
+            }
+            document.querySelectorAll('form').forEach(function(form) {
+                form.addEventListener('submit', function(evt) {
+                    if (lockFormSubmit(form)) {
+                        evt.preventDefault();
+                    }
+                });
+            });
+            document.addEventListener('keydown', function(evt) {
+                if (evt.key === 'Escape') {
+                    closeAddEmployeeModal();
+                    closeSpecialTaskModal();
+                    closeAttendanceViewModal();
+                    closePayrollViewModal();
+                    closeLeftEmployeesModal();
+                }
+            });
             renderSelectedCount();
             syncAttendanceHiddenFields();
         });

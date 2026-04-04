@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from modules.storage.db_doc_store import load_doc, save_doc
+from web.models import Session, SawMachineRecord
 
 
 DATA_FILE = Path.home() / "AIF/data/hr/hr.json"
@@ -36,10 +37,16 @@ def _default_org() -> dict[str, Any]:
             "overtime_multipliers": [1.5, 2.0],
             "default_overtime_multiplier": 1.5,
         },
+        "saw_piecework": {
+            "enabled": 1,
+            "default_unit_price": 0.0,
+            "bindings": [],
+        },
         "notes": [
             "药浸师与烘干房控制为同一人可用岗位: 药浸烘干控制(同岗)",
             "司机与采购同一人可用岗位: 采购兼司机",
             "当前锯工可设置为计件工",
+            "可在 HR 设置中配置锯工与锯号映射，系统会按单台锯托数自动计件",
         ],
     }
 
@@ -241,6 +248,40 @@ def _ensure_org(d: dict[str, Any]) -> None:
         cleaned_multipliers.append(default_mul)
     attendance_cfg["default_overtime_multiplier"] = default_mul
     d["org"]["attendance"] = attendance_cfg
+    if not isinstance(d["org"].get("saw_piecework"), dict):
+        d["org"]["saw_piecework"] = _default_org()["saw_piecework"]
+    saw_cfg = d["org"].get("saw_piecework", {})
+    if not isinstance(saw_cfg.get("enabled"), int):
+        saw_cfg["enabled"] = 1 if bool(saw_cfg.get("enabled", 1)) else 0
+    saw_cfg["default_unit_price"] = max(0.0, round(_to_float(saw_cfg.get("default_unit_price"), 0.0), 4))
+    bindings = saw_cfg.get("bindings", [])
+    if not isinstance(bindings, list):
+        bindings = []
+    clean_bindings: list[dict[str, Any]] = []
+    seen_machine: set[int] = set()
+    for item in bindings:
+        if not isinstance(item, dict):
+            continue
+        machine_no = _to_int(item.get("machine_no"), 0)
+        if machine_no < 1 or machine_no > 6 or machine_no in seen_machine:
+            continue
+        seen_machine.add(machine_no)
+        primary_name = str(item.get("primary_name", "") or "").strip()
+        assistant_name = str(item.get("assistant_name", "") or "").strip()
+        legacy_name = str(item.get("employee_name", "") or "").strip()
+        if not primary_name and legacy_name:
+            primary_name = legacy_name
+        clean_bindings.append(
+            {
+                "machine_no": machine_no,
+                "primary_name": primary_name,
+                "assistant_name": assistant_name,
+                "unit_price": max(0.0, round(_to_float(item.get("unit_price"), 0.0), 4)),
+            }
+        )
+    clean_bindings.sort(key=lambda x: _to_int(x.get("machine_no"), 0))
+    saw_cfg["bindings"] = clean_bindings
+    d["org"]["saw_piecework"] = saw_cfg
     if not isinstance(d["org"].get("notes"), list):
         d["org"]["notes"] = _default_org()["notes"]
 
@@ -271,6 +312,17 @@ def _period_half_month(day_text: str) -> tuple[str, str]:
         else:
             nxt = dt.replace(month=dt.month + 1, day=1)
         end = nxt - timedelta(days=1)
+    return start.strftime(DATE_FMT), end.strftime(DATE_FMT)
+
+
+def _period_month(day_text: str) -> tuple[str, str]:
+    dt = datetime.strptime(day_text, DATE_FMT)
+    start = dt.replace(day=1)
+    if dt.month == 12:
+        nxt = dt.replace(year=dt.year + 1, month=1, day=1)
+    else:
+        nxt = dt.replace(month=dt.month + 1, day=1)
+    end = nxt - timedelta(days=1)
     return start.strftime(DATE_FMT), end.strftime(DATE_FMT)
 
 
@@ -316,6 +368,137 @@ def _piece_income(d: dict[str, Any], name: str, begin: str, end: str) -> float:
     return amt
 
 
+def _piece_qty_manual(d: dict[str, Any], name: str, begin: str, end: str) -> float:
+    qty = 0.0
+    for rec in d.get("piecework_records", []):
+        if not isinstance(rec, dict):
+            continue
+        if str(rec.get("name", "")) != name:
+            continue
+        day = _parse_date(str(rec.get("date", "")))
+        if _in_range(day, begin, end):
+            qty += max(0.0, _to_float(rec.get("qty"), 0.0))
+    return qty
+
+
+def _record_day_text(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    if " " in text:
+        text = text.split(" ", 1)[0]
+    return _parse_date(text, default_today=False)
+
+
+def _piece_qty_from_saw_machine(d: dict[str, Any], name: str, begin: str, end: str) -> int:
+    org = d.get("org", {}) if isinstance(d.get("org"), dict) else {}
+    saw_cfg = org.get("saw_piecework", {}) if isinstance(org.get("saw_piecework"), dict) else {}
+    if _to_int(saw_cfg.get("enabled"), 1) != 1:
+        return 0
+    raw_bindings = saw_cfg.get("bindings", [])
+    if not isinstance(raw_bindings, list) or not raw_bindings:
+        return 0
+    binding = None
+    for row in raw_bindings:
+        if not isinstance(row, dict):
+            continue
+        primary_name = str(row.get("primary_name", "") or row.get("employee_name", "") or "").strip()
+        assistant_name = str(row.get("assistant_name", "") or "").strip()
+        if primary_name == name or assistant_name == name:
+            binding = row
+            break
+    if not isinstance(binding, dict):
+        return 0
+    machine_no = _to_int(binding.get("machine_no"), 0)
+    if machine_no < 1 or machine_no > 6:
+        return 0
+
+    session = None
+    try:
+        session = Session()
+        rows = (
+            session.query(SawMachineRecord.saw_trays, SawMachineRecord.created_at)
+            .filter(SawMachineRecord.machine_no == machine_no)
+            .all()
+        )
+        trays_total = 0
+        for saw_trays, created_at in rows:
+            day_text = _record_day_text(created_at)
+            if not day_text or not _in_range(day_text, begin, end):
+                continue
+            trays_total += max(0, _to_int(saw_trays, 0))
+        return trays_total
+    except Exception:
+        return 0
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+
+
+def _piece_income_from_saw_machine(d: dict[str, Any], name: str, begin: str, end: str) -> float:
+    org = d.get("org", {}) if isinstance(d.get("org"), dict) else {}
+    saw_cfg = org.get("saw_piecework", {}) if isinstance(org.get("saw_piecework"), dict) else {}
+    if _to_int(saw_cfg.get("enabled"), 1) != 1:
+        return 0.0
+    raw_bindings = saw_cfg.get("bindings", [])
+    if not isinstance(raw_bindings, list) or not raw_bindings:
+        return 0.0
+    binding = None
+    for row in raw_bindings:
+        if not isinstance(row, dict):
+            continue
+        primary_name = str(row.get("primary_name", "") or row.get("employee_name", "") or "").strip()
+        assistant_name = str(row.get("assistant_name", "") or "").strip()
+        if primary_name == name or assistant_name == name:
+            binding = row
+            break
+    if not isinstance(binding, dict):
+        return 0.0
+    machine_no = _to_int(binding.get("machine_no"), 0)
+    if machine_no < 1 or machine_no > 6:
+        return 0.0
+
+    emps = d.get("employees", {})
+    emp = emps.get(name, {}) if isinstance(emps, dict) else {}
+    # 计件单价优先使用员工档案（你在员工管理里维护的 11000/9000）。
+    # 锯号绑定里的单价仅作为兜底，不再覆盖员工单价。
+    rate = _to_float(emp.get("salary_value"), 0.0) if isinstance(emp, dict) else 0.0
+    if rate <= 0:
+        rate = _to_float(binding.get("unit_price"), 0.0)
+    if rate <= 0:
+        rate = _to_float(saw_cfg.get("default_unit_price"), 0.0)
+    if rate <= 0:
+        return 0.0
+    session = None
+    try:
+        session = Session()
+        rows = (
+            session.query(SawMachineRecord.saw_trays, SawMachineRecord.created_at)
+            .filter(SawMachineRecord.machine_no == machine_no)
+            .all()
+        )
+        trays_total = 0
+        for saw_trays, created_at in rows:
+            day_text = _record_day_text(created_at)
+            if not day_text or not _in_range(day_text, begin, end):
+                continue
+            trays_total += max(0, _to_int(saw_trays, 0))
+        return round(float(trays_total) * float(rate), 2)
+    except Exception:
+        return 0.0
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+
+
 def _rp_income(d: dict[str, Any], name: str, begin: str, end: str) -> tuple[float, float]:
     reward = 0.0
     penalty = 0.0
@@ -335,9 +518,12 @@ def _rp_income(d: dict[str, Any], name: str, begin: str, end: str) -> tuple[floa
     return reward, penalty
 
 
-def _calc_pay_for_employee(d: dict[str, Any], name: str, e: dict[str, Any], asof: str) -> dict[str, Any]:
+def _calc_pay_for_employee(d: dict[str, Any], name: str, e: dict[str, Any], asof: str, period_mode: str = "") -> dict[str, Any]:
     cycle = str(e.get("payout_cycle", _default_cycle(str(e.get("salary_type", "月薪")))))
-    if cycle == "semi_monthly":
+    mode = str(period_mode or "").strip().lower()
+    if mode in ("month", "natural_month"):
+        begin, end = _period_month(asof)
+    elif cycle == "semi_monthly":
         begin, end = _period_half_month(asof)
     else:
         begin, end = _period_week(asof)
@@ -348,6 +534,10 @@ def _calc_pay_for_employee(d: dict[str, Any], name: str, e: dict[str, Any], asof
     attendance = (regular_hours + overtime_hours) / 8.0
     attendance_hours = regular_hours + overtime_hours
     base = 0.0
+    piece_manual = 0.0
+    piece_saw_auto = 0.0
+    piece_qty_manual = 0.0
+    piece_qty_saw = 0
     overtime_pay = 0.0
     hour_rate = 0.0
 
@@ -367,7 +557,11 @@ def _calc_pay_for_employee(d: dict[str, Any], name: str, e: dict[str, Any], asof
             # 无考勤时保留历史行为：半月基数兜底
             base = salary_value / 2.0
     else:
-        base = _piece_income(d, name, begin, end)
+        piece_manual = _piece_income(d, name, begin, end)
+        piece_qty_manual = _piece_qty_manual(d, name, begin, end)
+        piece_saw_auto = _piece_income_from_saw_machine(d, name, begin, end)
+        piece_qty_saw = _piece_qty_from_saw_machine(d, name, begin, end)
+        base = piece_manual + piece_saw_auto
 
     reward, penalty = _rp_income(d, name, begin, end)
     net = base + overtime_pay + reward - penalty
@@ -380,6 +574,11 @@ def _calc_pay_for_employee(d: dict[str, Any], name: str, e: dict[str, Any], asof
         "overtime_hours": round(overtime_hours, 2),
         "hour_rate": round(hour_rate, 4),
         "base": round(base, 2),
+        "piece_manual": round(piece_manual, 2),
+        "piece_saw_auto": round(piece_saw_auto, 2),
+        "piece_qty_manual": round(piece_qty_manual, 3),
+        "piece_qty_saw": int(piece_qty_saw),
+        "piece_qty_total": round(piece_qty_manual + float(piece_qty_saw), 3),
         "overtime_pay": round(overtime_pay, 2),
         "reward": round(reward, 2),
         "penalty": round(penalty, 2),
@@ -593,6 +792,79 @@ def add_hr_attendance_from_admin(
     return True, f"✅ 已记录考勤: {emp_name} 正常{reg_h:.2f}h 加班{ot_h:.2f}h x{ot_m:.2f}", get_hr_employees_payload()
 
 
+def add_hr_special_task_from_admin(
+    name: str,
+    team: str,
+    task_name: str,
+    quantity: str,
+    unit_price: str,
+    day: str,
+    note: str = "",
+) -> tuple[bool, str, dict[str, Any]]:
+    d = _safe_load()
+    emps = d.get("employees", {})
+    if not isinstance(emps, dict):
+        return False, "❌ 员工数据异常", get_hr_employees_payload()
+
+    emp_name = str(name or "").strip()
+    team_name = str(team or "").strip()
+    if not emp_name and not team_name:
+        return False, "❌ 请至少选择员工或班组", get_hr_employees_payload()
+    if emp_name:
+        if emp_name not in emps:
+            return False, "❌ 请选择有效员工", get_hr_employees_payload()
+        e = emps.get(emp_name)
+        if isinstance(e, dict) and str(e.get("status", "在岗")) == "离职":
+            return False, "❌ 离职员工不能录入专项工作", get_hr_employees_payload()
+
+    task = str(task_name or "").strip()
+    if not task:
+        return False, "❌ 专项工作内容不能为空", get_hr_employees_payload()
+
+    qty = _to_float(str(quantity or "").strip() or 0, 0.0)
+    price = _to_float(str(unit_price or "").strip() or 0, 0.0)
+    if qty <= 0:
+        return False, "❌ 数量必须大于0", get_hr_employees_payload()
+    if price <= 0:
+        return False, "❌ 单价必须大于0", get_hr_employees_payload()
+
+    final_day = _parse_date(str(day or "").strip(), default_today=True)
+    final_note = str(note or "").strip()
+    amount = round(qty * price, 2)
+    reason = f"专项工作:{task} 数量{qty:.3f} 单价{price:.2f}"
+    if final_note:
+        reason = f"{reason} 备注:{final_note}"
+
+    rows = d.get("reward_penalty_records", [])
+    if not isinstance(rows, list):
+        rows = []
+        d["reward_penalty_records"] = rows
+    target_name = emp_name if emp_name else f"TEAM::{team_name}"
+    beneficiary_type = "employee" if emp_name else "team"
+    rows.append(
+        {
+            "name": target_name,
+            "type": "奖励",
+            "amount": amount,
+            "reason": reason,
+            "date": final_day,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "source": "admin_hr_special_task",
+            "beneficiary_type": beneficiary_type,
+            "employee_name": emp_name,
+            "team_name": team_name,
+            "task_name": task,
+            "quantity": round(qty, 3),
+            "unit_price": round(price, 2),
+            "note": final_note,
+        }
+    )
+    save(d)
+    target_label = team_name if team_name else emp_name
+    target_prefix = "班组" if team_name else "员工"
+    return True, f"✅ 已记录专项收入: {target_prefix}{target_label} {task} = {qty:.3f} x {price:.2f} = {amount:.2f}", get_hr_employees_payload()
+
+
 def _find_attendance_record(d: dict[str, Any], name: str, day: str) -> dict[str, Any] | None:
     rows = d.get("attendance_records", [])
     if not isinstance(rows, list):
@@ -709,6 +981,13 @@ def apply_hr_attendance_batch_from_admin(
         if str(e.get("status", "在岗")) == "离职":
             skipped += 1
             continue
+
+        # 出勤/加班 -> 在岗；下班(特殊工时) -> 离岗。
+        # 确保点击动作后，员工状态立即可见地变化。
+        if act in ("present", "overtime"):
+            e["status"] = "在岗"
+        elif act == "special_off":
+            e["status"] = "离岗"
 
         if act == "present":
             _upsert_attendance_record(
@@ -899,6 +1178,7 @@ def get_hr_admin_payload() -> dict[str, Any]:
     teams = org.get("teams", []) if isinstance(org.get("teams"), list) else []
     salary_types = org.get("salary_types", {}) if isinstance(org.get("salary_types"), dict) else {}
     attendance_cfg = org.get("attendance", {}) if isinstance(org.get("attendance"), dict) else {}
+    saw_cfg = org.get("saw_piecework", {}) if isinstance(org.get("saw_piecework"), dict) else {}
     overtime_multipliers_raw = attendance_cfg.get("overtime_multipliers", [])
     overtime_multipliers: list[float] = []
     if isinstance(overtime_multipliers_raw, list):
@@ -948,6 +1228,41 @@ def get_hr_admin_payload() -> dict[str, Any]:
             {"salary_type": "计件", "payout_cycle": "weekly", "desc": "按件核算，建议按周结算"},
         ]
     overtime_rows = [{"multiplier": f"{m:.2f}".rstrip("0").rstrip(".")} for m in overtime_multipliers]
+    saw_bindings_raw = saw_cfg.get("bindings", []) if isinstance(saw_cfg, dict) else []
+    saw_binding_rows: list[dict[str, Any]] = []
+    by_machine: dict[int, dict[str, Any]] = {}
+    if isinstance(saw_bindings_raw, list):
+        for row in saw_bindings_raw:
+            if not isinstance(row, dict):
+                continue
+            machine_no = _to_int(row.get("machine_no"), 0)
+            if machine_no < 1 or machine_no > 6:
+                continue
+            by_machine[machine_no] = row
+    for machine_no in range(1, 7):
+        row = by_machine.get(machine_no, {})
+        saw_binding_rows.append(
+            {
+                "machine_no": machine_no,
+                "primary_name": str(row.get("primary_name", "") or row.get("employee_name", "") or "").strip(),
+                "assistant_name": str(row.get("assistant_name", "") or "").strip(),
+                "unit_price": round(_to_float(row.get("unit_price"), 0.0), 4),
+            }
+        )
+    saw_employee_options: list[str] = []
+    if isinstance(emps, dict):
+        for name, e in emps.items():
+            if not isinstance(e, dict):
+                continue
+            if str(e.get("status", "在岗")) == "离职":
+                continue
+            team_text = str(e.get("team", "") or "").strip().lower()
+            position_text = str(e.get("position", "") or "").strip().lower()
+            is_saw_team = ("锯工组" in team_text) or ("saw" in team_text) or ("锯" in position_text) or ("saw" in position_text)
+            if not is_saw_team:
+                continue
+            saw_employee_options.append(str(e.get("name", "") or name))
+    saw_employee_options = sorted(set([x for x in saw_employee_options if x]))
     return {
         "org": org,
         "teams_json": json.dumps(org.get("teams", []), ensure_ascii=False, indent=2),
@@ -958,6 +1273,10 @@ def get_hr_admin_payload() -> dict[str, Any]:
         "salary_rows": salary_rows,
         "overtime_rows": overtime_rows,
         "overtime_default_multiplier": default_ot_multiplier,
+        "saw_piecework_enabled": _to_int(saw_cfg.get("enabled"), 1) == 1,
+        "saw_piecework_default_unit_price": round(_to_float(saw_cfg.get("default_unit_price"), 0.0), 4),
+        "saw_binding_rows": saw_binding_rows,
+        "saw_employee_options": saw_employee_options,
         "notes_text": "\n".join(org.get("notes", []) if isinstance(org.get("notes"), list) else []),
         "employee_total": len(emps) if isinstance(emps, dict) else 0,
         "employee_active": active,
@@ -1037,11 +1356,13 @@ def get_hr_employees_payload() -> dict[str, Any]:
                 }
             )
     attendance_rows: list[dict[str, Any]] = []
+    special_task_rows: list[dict[str, Any]] = []
     raw_attendance = d.get("attendance_records", [])
     today = _today()
     attended_today: set[str] = set()
     if isinstance(raw_attendance, list):
-        for rec in raw_attendance[-30:]:
+        # 出勤判断必须覆盖全部记录，避免记录顺序被人工调整后漏判“今日已出勤”。
+        for rec in raw_attendance:
             if not isinstance(rec, dict):
                 continue
             rh = _to_float(rec.get("regular_hours"), -1.0)
@@ -1062,7 +1383,56 @@ def get_hr_employees_payload() -> dict[str, Any]:
                 }
             )
     attendance_rows.sort(key=lambda x: (str(x.get("date", "")), str(x.get("name", ""))), reverse=True)
-    absent_today_names = [name for name in sorted(set(employee_options)) if name not in attended_today]
+    raw_rp = d.get("reward_penalty_records", [])
+    if isinstance(raw_rp, list):
+        for rec in raw_rp:
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("source", "")) != "admin_hr_special_task":
+                continue
+            special_task_rows.append(
+                {
+                    "date": str(rec.get("date", "") or ""),
+                    "beneficiary_type": str(rec.get("beneficiary_type", "") or "employee"),
+                    "employee_name": str(rec.get("employee_name", "") or ""),
+                    "team_name": str(rec.get("team_name", "") or ""),
+                    "name": str(rec.get("employee_name", "") or rec.get("name", "") or ""),
+                    "target_label": (
+                        str(rec.get("team_name", "") or "")
+                        if str(rec.get("beneficiary_type", "") or "employee") == "team"
+                        else str(rec.get("employee_name", "") or rec.get("name", "") or "")
+                    ),
+                    "task_name": str(rec.get("task_name", "") or ""),
+                    "quantity": round(max(0.0, _to_float(rec.get("quantity"), 0.0)), 3),
+                    "unit_price": round(max(0.0, _to_float(rec.get("unit_price"), 0.0)), 2),
+                    "amount": round(max(0.0, _to_float(rec.get("amount"), 0.0)), 2),
+                    "note": str(rec.get("note", "") or ""),
+                }
+            )
+    special_task_rows.sort(key=lambda x: (str(x.get("date", "")), str(x.get("name", ""))), reverse=True)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_status = str(row.get("status", "") or "")
+        name = str(row.get("name", "") or "")
+        if raw_status == "离职":
+            att_code = "left"
+        elif raw_status == "离岗":
+            att_code = "off"
+        elif raw_status == "病假":
+            att_code = "sick"
+        elif raw_status == "休假":
+            att_code = "leave"
+        elif name and name in attended_today:
+            att_code = "present"
+        else:
+            att_code = "absent"
+        row["today_attendance_status"] = att_code
+    absent_today_names = [
+        str(r.get("name", "") or "")
+        for r in rows
+        if str(r.get("today_attendance_status", "") or "") == "absent" and str(r.get("name", "") or "").strip()
+    ]
     rows.sort(key=lambda r: (0 if r.get("status") != "离职" else 1, str(r.get("name", ""))))
     return {
         "employee_total": len(rows),
@@ -1077,9 +1447,78 @@ def get_hr_employees_payload() -> dict[str, Any]:
         "overtime_default_multiplier": overtime_default_multiplier,
         "team_positions_map": team_positions_map,
         "attendance_rows": attendance_rows[:20],
+        "special_task_rows": special_task_rows[:20],
         "attendance_day": today,
         "absent_today_names": absent_today_names,
         "absent_today_count": len(absent_today_names),
+    }
+
+
+def get_hr_attendance_records(
+    day_from: str = "",
+    day_to: str = "",
+    name: str = "",
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    d = _safe_load()
+    rows = d.get("attendance_records", [])
+    if not isinstance(rows, list):
+        return []
+    begin = _parse_date(str(day_from or "").strip(), default_today=False)
+    end = _parse_date(str(day_to or "").strip(), default_today=False)
+    who = str(name or "").strip()
+    out: list[dict[str, Any]] = []
+    for rec in rows:
+        if not isinstance(rec, dict):
+            continue
+        rec_name = str(rec.get("name", "") or "")
+        rec_day = _parse_date(str(rec.get("date", "") or ""), default_today=False)
+        if who and rec_name != who:
+            continue
+        if begin and rec_day and rec_day < begin:
+            continue
+        if end and rec_day and rec_day > end:
+            continue
+        rh = _to_float(rec.get("regular_hours"), -1.0)
+        if rh < 0:
+            rh = max(0.0, _to_float(rec.get("days"), 0.0) * 8.0)
+        row = {
+            "date": rec_day or str(rec.get("date", "") or ""),
+            "name": rec_name,
+            "regular_hours": round(max(0.0, rh), 2),
+            "overtime_hours": round(max(0.0, _to_float(rec.get("overtime_hours"), 0.0)), 2),
+            "overtime_multiplier": round(_to_float(rec.get("overtime_multiplier"), 1.5), 2),
+            "source": str(rec.get("source", "") or ""),
+        }
+        out.append(row)
+    out.sort(key=lambda x: (str(x.get("date", "")), str(x.get("name", ""))), reverse=True)
+    max_n = max(1, int(limit or 1))
+    return out[:max_n]
+
+
+def get_hr_payroll_preview(asof: str = "", name: str = "") -> dict[str, Any]:
+    d = _safe_load()
+    emps = d.get("employees", {})
+    if not isinstance(emps, dict):
+        return {"asof": "", "rows": [], "total_net": 0.0}
+    final_asof = _parse_date(str(asof or "").strip(), default_today=True)
+    who = str(name or "").strip()
+    targets = [who] if who else sorted(emps.keys())
+    rows: list[dict[str, Any]] = []
+    total_net = 0.0
+    for n in targets:
+        e = emps.get(n)
+        if not isinstance(e, dict):
+            continue
+        if str(e.get("status", "在岗")) == "离职":
+            continue
+        pay = _calc_pay_for_employee(d, n, e, final_asof, period_mode="natural_month")
+        rows.append(pay)
+        total_net += _to_float(pay.get("net"), 0.0)
+    return {
+        "asof": final_asof,
+        "rows": rows,
+        "total_net": round(total_net, 2),
     }
 
 
@@ -1174,7 +1613,7 @@ def update_hr_employee_from_admin(
         final_join_date = str(e.get("join_date", "") or "")
 
     final_status = str(status or "").strip() or str(e.get("status", "在岗") or "在岗")
-    if final_status not in ("在岗", "离岗", "离职"):
+    if final_status not in ("在岗", "离岗", "离职", "病假", "休假"):
         final_status = str(e.get("status", "在岗") or "在岗")
 
     final_cycle = _default_cycle(final_salary_type)
@@ -1199,6 +1638,38 @@ def update_hr_employee_from_admin(
 
     save(d)
     return True, f"✅ 已更新员工: {emp_name}", get_hr_employees_payload()
+
+
+def update_hr_employee_status_from_admin(
+    original_name: str,
+    status: str,
+) -> tuple[bool, str, dict[str, Any]]:
+    d = _safe_load()
+    _ensure_org(d)
+    emps = d.get("employees", {})
+    if not isinstance(emps, dict):
+        return False, "❌ 员工数据异常", get_hr_employees_payload()
+
+    emp_name = str(original_name or "").strip()
+    if not emp_name:
+        return False, "❌ 缺少员工姓名", get_hr_employees_payload()
+    e = emps.get(emp_name)
+    if not isinstance(e, dict):
+        return False, f"❌ 未找到员工: {emp_name}", get_hr_employees_payload()
+
+    final_status = str(status or "").strip()
+    if final_status not in ("在岗", "离岗", "离职", "病假", "休假"):
+        return False, "❌ 状态无效", get_hr_employees_payload()
+
+    e["status"] = final_status
+    if final_status == "离职":
+        e["left_date"] = str(e.get("left_date", "") or _today())
+    else:
+        e["left_date"] = ""
+        e["left_reason"] = ""
+
+    save(d)
+    return True, f"✅ 已更新状态: {emp_name} -> {final_status}", get_hr_employees_payload()
 
 
 def _parse_teams_text(text: str) -> list[dict[str, Any]]:
@@ -1247,6 +1718,12 @@ def save_hr_admin_settings(
     salary_descs: list[str] | None = None,
     overtime_multipliers: list[str] | None = None,
     default_overtime_multiplier: str = "",
+    saw_piecework_enabled: str = "",
+    saw_default_unit_price: str = "",
+    saw_bind_machine_no: list[str] | None = None,
+    saw_bind_primary_name: list[str] | None = None,
+    saw_bind_assistant_name: list[str] | None = None,
+    saw_bind_unit_price: list[str] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     d = _safe_load()
     _ensure_org(d)
@@ -1311,11 +1788,43 @@ def save_hr_admin_settings(
     if default_ot not in ot_values:
         ot_values.append(default_ot)
 
+    saw_enabled = 1 if str(saw_piecework_enabled or "").strip() in ("1", "true", "on", "yes") else 0
+    saw_default_price = max(0.0, round(_to_float(str(saw_default_unit_price or "").strip() or 0.0, 0.0), 4))
+    saw_bindings: list[dict[str, Any]] = []
+    machine_seen: set[int] = set()
+    machine_list = saw_bind_machine_no or []
+    primary_list = saw_bind_primary_name or []
+    assistant_list = saw_bind_assistant_name or []
+    price_list = saw_bind_unit_price or []
+    max_bind_n = max(len(machine_list), len(primary_list), len(assistant_list), len(price_list))
+    for i in range(max_bind_n):
+        machine_no = _to_int(machine_list[i] if i < len(machine_list) else 0, 0)
+        if machine_no < 1 or machine_no > 6 or machine_no in machine_seen:
+            continue
+        machine_seen.add(machine_no)
+        primary_name = str(primary_list[i] if i < len(primary_list) else "").strip()
+        assistant_name = str(assistant_list[i] if i < len(assistant_list) else "").strip()
+        unit_price = max(0.0, round(_to_float(price_list[i] if i < len(price_list) else 0.0, 0.0), 4))
+        saw_bindings.append(
+            {
+                "machine_no": machine_no,
+                "primary_name": primary_name,
+                "assistant_name": assistant_name,
+                "unit_price": unit_price,
+            }
+        )
+    saw_bindings.sort(key=lambda x: _to_int(x.get("machine_no"), 0))
+
     d["org"]["teams"] = teams
     d["org"]["salary_types"] = salary_types
     d["org"]["attendance"] = {
         "overtime_multipliers": ot_values,
         "default_overtime_multiplier": default_ot,
+    }
+    d["org"]["saw_piecework"] = {
+        "enabled": saw_enabled,
+        "default_unit_price": saw_default_price,
+        "bindings": saw_bindings,
     }
     d["org"]["notes"] = notes
     save(d)

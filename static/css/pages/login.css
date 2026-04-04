@@ -1,5 +1,7 @@
 body { margin: 0; padding: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
 .login-container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+.aif-logo-wrap { display:flex; justify-content:center; margin:0 0 10px; }
+.aif-logo { width:min(220px, 70vw); height:auto; display:block; }
 h1 { margin-bottom: 30px; }
 .form-group { margin-bottom: 20px; }
 label { display: block; margin-bottom: 5px; color: #555; font-weight: bold; }

@@ -775,6 +775,9 @@ def _build_label_workbook_from_template(template_path: Path, rows: list, logo_pa
 
 
 def _resolve_logo_path() -> Path:
+    preferred = BASE / "static" / "AIF_logo.png"
+    if preferred.exists():
+        return preferred
     primary = BASE / "static" / "logo.png"
     if primary.exists():
         return primary

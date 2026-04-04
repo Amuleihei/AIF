@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ texts.login_title }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/login.css') }}">
 </head>
@@ -18,6 +19,9 @@
             </select>
         </div>
 
+        <div class="aif-logo-wrap">
+            <img src="{{ url_for('static', filename='AIF_logo.png') }}" alt="AIF Logo" class="aif-logo">
+        </div>
         <h1>{{ texts.login_title }}</h1>
 
         {% with messages = get_flashed_messages(with_categories=true) %}

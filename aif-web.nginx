@@ -1,15 +1,53 @@
+# 1) HTTP 统一入口：无论 IP 还是域名，一律跳到域名 HTTPS
 server {
-    listen 80;
-    server_name your-domain.com;  # 替换为你的域名或服务器IP
+    listen 80 default_server;
+    server_name _;
 
-    # 静态文件服务
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
+    return 301 https://aifbot.pro$request_uri;
+}
+
+# 2) HTTPS 非域名入口（IP/其他 Host）：统一跳转到域名
+# 注意：若浏览器访问的是“未包含在证书SAN里的IP”，TLS 握手前仍可能报证书名不匹配，这是 HTTPS 机制决定的。
+server {
+    listen 443 ssl default_server;
+    server_name _;
+
+    ssl_certificate /home/amuleihei/AIF/ssl/local.crt;
+    ssl_certificate_key /home/amuleihei/AIF/ssl/local.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    return 301 https://aifbot.pro$request_uri;
+}
+
+# 3) 域名主站
+server {
+    listen 443 ssl;
+    server_name aifbot.pro;
+
+    ssl_certificate /home/amuleihei/AIF/ssl/local.crt;
+    ssl_certificate_key /home/amuleihei/AIF/ssl/local.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
     location /static/ {
         alias /home/amuleihei/AIF/web/static/;
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
 
-    # 主应用反向代理
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
@@ -17,18 +55,15 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # WebSocket支持（如果需要）
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        # 超时设置
         proxy_connect_timeout 30s;
         proxy_send_timeout 30s;
         proxy_read_timeout 30s;
     }
 
-    # 日志
     access_log /var/log/nginx/aif-web.access.log;
     error_log /var/log/nginx/aif-web.error.log;
 }

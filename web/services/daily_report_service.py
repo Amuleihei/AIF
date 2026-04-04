@@ -335,6 +335,28 @@ def _sum_daily_secondary_sort_trays_from_audit(session, day_str: str) -> int:
     return max(0, total)
 
 
+def _daily_rolled_back_tray_batches_from_audit(session, day_str: str) -> set[str]:
+    """
+    识别当日被“回流待入窑”的入窑批次（manual_restore），用于日报排除失效入窑量。
+    示例：rollback ... moved batch D202604020001 back to pending ...
+    """
+    rows = (
+        session.query(AdminAuditLog.detail)
+        .filter(AdminAuditLog.action == "manual_restore")
+        .filter(AdminAuditLog.created_at.like(f"{day_str}%"))
+        .filter(AdminAuditLog.detail.like("%moved batch%back to pending%"))
+        .all()
+    )
+    out: set[str] = set()
+    for row in rows:
+        detail = str(getattr(row, "detail", "") or "")
+        m = re.search(r"moved\s+batch\s+([A-Za-z][0-9]{8,})\s+back\s+to\s+pending", detail, re.I)
+        if not m:
+            continue
+        out.add(str(m.group(1) or "").strip().upper())
+    return out
+
+
 def build_daily_report(day_text: str | None = None, lang: str = "zh") -> dict:
     day_obj = _normalize_day(day_text)
     day_str = day_obj.strftime("%Y-%m-%d")
@@ -351,9 +373,16 @@ def build_daily_report(day_text: str | None = None, lang: str = "zh") -> dict:
         second_sort_rows = _fetch_day_rows(session, FlowSecondSortRecord, day_str, time_field="time")
         kiln_unload_trays = _sum_daily_kiln_unload_trays_from_audit(session, day_str)
         secondary_trays_from_audit = _sum_daily_secondary_sort_trays_from_audit(session, day_str)
+        rolled_back_tray_batches = _daily_rolled_back_tray_batches_from_audit(session, day_str)
         id_finished_pcs, id_finished_m3 = _derive_finished_from_daily_product_ids(session, day_obj)
     finally:
         session.close()
+
+    if rolled_back_tray_batches:
+        tray_rows = [
+            r for r in tray_rows
+            if str(getattr(r, "batch_number", "") or "").strip().upper() not in rolled_back_tray_batches
+        ]
 
     log_in_mt = sum(_safe_float(r.log_amount) for r in log_rows)
     saw_log_consumed_mt = sum(_safe_float(r.saw_mt) for r in saw_rows)

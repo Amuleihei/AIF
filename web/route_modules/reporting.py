@@ -162,6 +162,7 @@ PERIOD_REPORT_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <style>
         body { font-family: Arial, sans-serif; margin: 12px; background: #f5f5f5; }
         .container { max-width: 980px; margin: 0 auto; background: #fff; padding: 14px; border-radius: 8px; box-shadow: 0 1px 8px rgba(0,0,0,0.08); }

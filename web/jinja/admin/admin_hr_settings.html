@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ texts.get('hr_settings_title', 'HR设置') }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/admin_hr_settings.css') }}">
@@ -102,6 +103,56 @@
                     <label style="margin:0; font-weight:normal;">{{ texts.get('hr_default_ot_ratio', '默认加班倍率') }}</label>
                     <input type="number" step="0.1" min="0.1" name="ot_default_multiplier" value="{{ data.overtime_default_multiplier }}" style="max-width:180px;">
                 </div>
+            </div>
+
+            <div class="row">
+                <label>{{ texts.get('hr_saw_piecework_section', '锯工计件（按单台锯托数自动核算）') }}</label>
+                <div class="row-actions">
+                    <label style="margin:0; font-weight:normal; display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" name="saw_piecework_enabled" value="1" {% if data.saw_piecework_enabled %}checked{% endif %}>
+                        {{ texts.get('hr_saw_piecework_enabled', '启用自动锯解计件') }}
+                    </label>
+                    <label style="margin:0; font-weight:normal;">{{ texts.get('hr_saw_default_unit_price', '默认单价（Ks/托）') }}</label>
+                    <input type="number" step="0.0001" min="0" name="saw_default_unit_price" value="{{ data.saw_piecework_default_unit_price or 0 }}" style="max-width:180px;">
+                </div>
+                <table class="tbl" id="saw-bind-table">
+                    <thead>
+                        <tr>
+                            <th style="width:120px;">{{ texts.get('hr_saw_machine_no', '锯号') }}</th>
+                            <th>{{ texts.get('hr_saw_bind_primary', '主锯') }}</th>
+                            <th>{{ texts.get('hr_saw_bind_assistant', '副锯') }}</th>
+                            <th style="width:180px;">{{ texts.get('hr_saw_bind_unit_price', '单价（Ks/托）') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data.saw_binding_rows %}
+                        <tr>
+                            <td>
+                                <input type="hidden" name="saw_bind_machine_no" value="{{ row.machine_no }}">
+                                <strong>{{ row.machine_no }}{{ texts.get('saw_machine_no_suffix', '号锯') }}</strong>
+                            </td>
+                            <td>
+                                <select name="saw_bind_primary_name">
+                                    <option value="">{{ texts.get('hr_unbound', '未绑定') }}</option>
+                                    {% for n in data.saw_employee_options %}
+                                    <option value="{{ n }}" {% if row.primary_name == n %}selected{% endif %}>{{ n }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select name="saw_bind_assistant_name">
+                                    <option value="">{{ texts.get('hr_unbound', '未绑定') }}</option>
+                                    {% for n in data.saw_employee_options %}
+                                    <option value="{{ n }}" {% if row.assistant_name == n %}selected{% endif %}>{{ n }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td><input type="number" step="0.0001" min="0" name="saw_bind_unit_price" value="{{ row.unit_price or 0 }}"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="hint">{{ texts.get('hr_saw_piecework_hint', '已绑定员工将按该锯号每日锯解托数自动计件；若单价为空则回退员工薪资值，再回退默认单价。') }}</div>
             </div>
 
             <div class="row">
