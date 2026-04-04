@@ -64,11 +64,10 @@ python web_app.py
 
 ### 打赏通道
 如果这个项目对你有帮助，欢迎支持开发：
-- USDT (TRC20): `YOUR_USDT_TRC20_ADDRESS`
-- BTC: `YOUR_BTC_ADDRESS`
-- ETH (ERC20): `YOUR_ETH_ADDRESS`
-- Buy Me a Coffee: `https://buymeacoffee.com/YOUR_ID`
-- Ko-fi: `https://ko-fi.com/YOUR_ID`
+- USDT (TRC20): `TUrrNPbe9pDcJM6F1i5HQNSyAQYQH3EcyE`
+- BTC: `bc1ptg2c8cm6uyn7x44tuz967p2dlx8xjmxws774mn307xptjwgul3eswtfk46`
+- ETH (ERC20): `0xeb6140cAd536Df9b48D6029dCDcD20D06D5bf2a8`
+
 
 > 发布前请把占位地址替换为你的真实收款地址。
 
@@ -134,11 +133,10 @@ python web_app.py
 
 ### Donation
 If this project helps you, you can support development here:
-- USDT (TRC20): `YOUR_USDT_TRC20_ADDRESS`
-- BTC: `YOUR_BTC_ADDRESS`
-- ETH (ERC20): `YOUR_ETH_ADDRESS`
-- Buy Me a Coffee: `https://buymeacoffee.com/YOUR_ID`
-- Ko-fi: `https://ko-fi.com/YOUR_ID`
+- USDT (TRC20): `YTUrrNPbe9pDcJM6F1i5HQNSyAQYQH3EcyE`
+- BTC: `bc1ptg2c8cm6uyn7x44tuz967p2dlx8xjmxws774mn307xptjwgul3eswtfk46`
+- ETH (ERC20): `0xeb6140cAd536Df9b48D6029dCDcD20D06D5bf2a8`
+
 
 ---
 
@@ -201,8 +199,7 @@ python web_app.py
 - Web deployment: `WEB_DEPLOYMENT_README.md`
 
 ### လှူဒါန်းရန်
-- USDT (TRC20): `YOUR_USDT_TRC20_ADDRESS`
-- BTC: `YOUR_BTC_ADDRESS`
-- ETH (ERC20): `YOUR_ETH_ADDRESS`
-- Buy Me a Coffee: `https://buymeacoffee.com/YOUR_ID`
-- Ko-fi: `https://ko-fi.com/YOUR_ID`
+- USDT (TRC20): `TUrrNPbe9pDcJM6F1i5HQNSyAQYQH3EcyE`
+- BTC: `bc1ptg2c8cm6uyn7x44tuz967p2dlx8xjmxws774mn307xptjwgul3eswtfk46`
+- ETH (ERC20): `0xeb6140cAd536Df9b48D6029dCDcD20D06D5bf2a8`
+
