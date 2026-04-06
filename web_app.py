@@ -11,6 +11,7 @@ from aif import load_modules
 from web.models import Session, User
 from web.observability import configure_web_logging
 from web.routes import register_routes
+from web.services.ai_monitor_service import maybe_trigger_deep_monitor_by_db
 
 
 BASE = Path(__file__).parent
@@ -93,6 +94,11 @@ def _before_request():
 def _after_request(response):
     started = float(getattr(g, "_request_started_at", time.time()))
     elapsed_ms = int((time.time() - started) * 1000)
+    try:
+        if response.status_code < 400:
+            maybe_trigger_deep_monitor_by_db(lang="zh")
+    except Exception:
+        logger.exception("ai_monitor_trigger_failed")
     logger.info(
         "http_request method=%s path=%s status=%s dur_ms=%s ip=%s",
         request.method,

@@ -1,0 +1,27 @@
+[Unit]
+Description=Local AI Qwen server via llama.cpp
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=amuleihei
+Group=amuleihei
+WorkingDirectory=/home/amuleihei/AIF
+Environment=HOME=/home/amuleihei
+Environment=LOCAL_AI_HOST=127.0.0.1
+Environment=LOCAL_AI_PORT=8012
+Environment=LOCAL_AI_CTX=4096
+Environment=LOCAL_AI_THREADS=8
+Environment=LOCAL_AI_PARALLEL=1
+Environment=LOCAL_AI_MODEL=/home/amuleihei/local-llm/models/current-chat-model.gguf
+ExecStart=/home/amuleihei/AIF/scripts/start_local_ai.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=local-ai-qwen
+
+[Install]
+WantedBy=multi-user.target

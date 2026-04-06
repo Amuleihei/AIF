@@ -7,7 +7,7 @@ from modules.storage.db_doc_store import load_doc, save_doc
 DATA_FILE = Path.home() / "AIF/data/finance/finance.json"
 DOC_KEY = "finance_finance_v1"
 CURRENCY = "KS"
-FINANCE_DISABLED = True  # 临时关闭财务功能（防止现场误操作/系统风险）
+FINANCE_DISABLED = False
 
 
 # =====================================================
@@ -19,6 +19,9 @@ def default_data():
         "accounts": {
             "cash": 0.0,
             "bank": 0.0
+        },
+        "settings": {
+            "currency": CURRENCY,
         },
         "records": []
     }
@@ -43,6 +46,9 @@ def upgrade(d):
     if "records" not in d:
         d["records"] = []
 
+    if "settings" not in d or not isinstance(d.get("settings"), dict):
+        d["settings"] = {"currency": CURRENCY}
+
     return d
 
 
@@ -63,14 +69,17 @@ def save(d):
 # 记录工具
 # =====================================================
 
-def add_record(d, typ, amount, account, note=""):
+def add_record(d, typ, amount, account, note="", category="", ref_no="", operator=""):
 
     d["records"].append({
         "time": datetime.now().isoformat(),
         "type": typ,
         "amount": amount,
         "account": account,
-        "note": note
+        "note": note,
+        "category": category,
+        "ref_no": ref_no,
+        "operator": operator,
     })
 
 
@@ -78,13 +87,13 @@ def add_record(d, typ, amount, account, note=""):
 # 收入
 # =====================================================
 
-def income(d, amount, note, account="cash"):
+def income(d, amount, note, account="cash", category="", ref_no="", operator=""):
 
     d["accounts"].setdefault(account, 0.0)
 
     d["accounts"][account] += amount
 
-    add_record(d, "income", amount, account, note)
+    add_record(d, "income", amount, account, note, category=category, ref_no=ref_no, operator=operator)
 
     return f"💰 收入 {amount:.2f} {CURRENCY} → {account}"
 
@@ -93,7 +102,7 @@ def income(d, amount, note, account="cash"):
 # 支出
 # =====================================================
 
-def expense(d, amount, note, account="cash"):
+def expense(d, amount, note, account="cash", category="", ref_no="", operator=""):
 
     d["accounts"].setdefault(account, 0.0)
 
@@ -102,7 +111,7 @@ def expense(d, amount, note, account="cash"):
 
     d["accounts"][account] -= amount
 
-    add_record(d, "expense", amount, account, note)
+    add_record(d, "expense", amount, account, note, category=category, ref_no=ref_no, operator=operator)
 
     return f"💸 支出 {amount:.2f} {CURRENCY} ← {account}"
 
@@ -111,7 +120,7 @@ def expense(d, amount, note, account="cash"):
 # 转账
 # =====================================================
 
-def transfer(d, amount, src, dst):
+def transfer(d, amount, src, dst, note="", ref_no="", operator=""):
 
     d["accounts"].setdefault(src, 0.0)
     d["accounts"].setdefault(dst, 0.0)
@@ -122,7 +131,7 @@ def transfer(d, amount, src, dst):
     d["accounts"][src] -= amount
     d["accounts"][dst] += amount
 
-    add_record(d, "transfer", amount, f"{src}->{dst}")
+    add_record(d, "transfer", amount, f"{src}->{dst}", note, category="transfer", ref_no=ref_no, operator=operator)
 
     return f"🔁 转账 {amount:.2f} {CURRENCY} {src} → {dst}"
 

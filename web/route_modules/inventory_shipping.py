@@ -242,6 +242,72 @@ def register_inventory_shipping_routes(app):
         )
         return jsonify({"success": True, "shipment_no": shipment_no})
 
+    @app.route("/api/shipping_orders/manual", methods=["POST"])
+    @login_required
+    def api_create_manual_shipping_order():
+        payload = request.get_json(silent=True) or {}
+        customer = str(payload.get("customer", "") or "").strip() or "手动补录"
+        destination = str(payload.get("destination", "") or "").strip() or "仰光仓"
+        vehicle_no = str(payload.get("vehicle_no", "") or "").strip()
+        driver_name = str(payload.get("driver_name", "") or "").strip()
+        tracking_no = str(payload.get("tracking_no", "") or "").strip()
+        remark = str(payload.get("remark", "") or "").strip()
+        departure_at = str(payload.get("departure_at", "") or "").strip()
+        eta_hours_to_yangon = _to_int(payload.get("eta_hours_to_yangon"), 36)
+        total_pcs = max(0, _to_int(payload.get("total_pcs"), 0))
+        total_volume = round(max(0.0, _to_float(payload.get("total_volume"), 0.0)), 4)
+
+        if total_pcs <= 0 and total_volume <= 0:
+            return jsonify({"error": _t("shipment_manual_required")}), 400
+
+        shipping_data = get_shipping_data()
+        shipment_no = _next_shipment_no(shipping_data)
+        now = datetime.now().isoformat()
+        if not departure_at:
+            departure_at = now
+        initial_status = "去仰光途中"
+        try:
+            if datetime.fromisoformat(departure_at) > datetime.now():
+                initial_status = "待发车"
+        except Exception:
+            pass
+        shipping_data["shipments"].append(
+            {
+                "shipment_no": shipment_no,
+                "customer": customer,
+                "destination": destination,
+                "tracking_no": tracking_no,
+                "vehicle_no": vehicle_no,
+                "driver_name": driver_name,
+                "remark": remark,
+                "departure_at": departure_at,
+                "eta_hours_to_yangon": max(1, eta_hours_to_yangon),
+                "yangon_arrived_at": "",
+                "yangon_departed_at": "",
+                "china_port_arrived_at": "",
+                "status": initial_status,
+                "products": [
+                    {
+                        "product_id": "",
+                        "spec": "手动补录",
+                        "grade": "MANUAL",
+                        "pcs": total_pcs,
+                        "volume": total_volume,
+                    }
+                ],
+                "created_at": now,
+                "updated_at": now,
+                "created_by": current_user.username,
+            }
+        )
+        save_shipping_data(shipping_data)
+        audit_admin_action(
+            "create_shipping_order_manual",
+            target=shipment_no,
+            detail=f"status={initial_status},pcs={total_pcs},m3={total_volume},customer={customer},vehicle={vehicle_no}",
+        )
+        return jsonify({"success": True, "shipment_no": shipment_no})
+
     @app.route("/api/shipping_orders/<shipment_no>", methods=["PATCH"])
     @login_required
     def api_update_shipping_order(shipment_no):

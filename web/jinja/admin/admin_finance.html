@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="{{ lang or 'zh' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.get('finance_workbench_title', '财务工作台') }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
+    <style>
+        :root {
+            --bg: #f5f7fb;
+            --card: rgba(255,255,255,.88);
+            --line: rgba(148,163,184,.22);
+            --ink: #0f172a;
+            --muted: #64748b;
+            --accent: #0f766e;
+            --accent-soft: #ecfdf5;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: radial-gradient(circle at top left, rgba(15,118,110,.08), transparent 28%), var(--bg); color: var(--ink); }
+        .wrap { max-width: 1220px; margin: 0 auto; padding: 18px 14px 36px; }
+        .back { color: #0d6efd; text-decoration: none; }
+        .topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+        .title h1 { margin: 8px 0 4px; font-size: 28px; }
+        .title p { margin: 0; color: var(--muted); }
+        .chip { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; border:1px solid var(--line); background: rgba(255,255,255,.8); font-size:12px; color: var(--muted); }
+        .msg-ok, .msg-err { margin: 10px 0; padding: 10px 12px; border-radius: 12px; }
+        .msg-ok { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; }
+        .msg-err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+        .hero { display:grid; grid-template-columns: 1.2fr .8fr; gap:14px; }
+        .card { border:1px solid var(--line); border-radius: 18px; background: var(--card); backdrop-filter: blur(14px); box-shadow: 0 18px 34px rgba(15,23,42,.05); padding: 16px; }
+        .card h2, .card h3 { margin: 0 0 8px; }
+        .muted { color: var(--muted); font-size: 13px; }
+        .grid4 { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:12px; margin-top: 12px; }
+        .metric { padding: 14px; border-radius: 16px; border:1px solid var(--line); background: linear-gradient(180deg, rgba(240,253,250,.85), #fff); }
+        .metric .k { color: var(--muted); font-size: 12px; }
+        .metric .v { margin-top: 6px; font-size: 24px; font-weight: 700; }
+        .section-grid { display:grid; grid-template-columns: 1.05fr .95fr; gap:14px; margin-top: 14px; }
+        .subgrid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; }
+        .form-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:10px; }
+        .form-grid-3 { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:10px; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border-radius: 12px; border:1px solid #dbe3ef; background: rgba(255,255,255,.96); font: inherit; }
+        textarea { min-height: 92px; resize: vertical; }
+        .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+        .btn { display:inline-flex; align-items:center; justify-content:center; border:none; border-radius: 12px; padding: 10px 14px; cursor:pointer; font: inherit; color:#fff; background:#0f766e; text-decoration:none; }
+        .btn.secondary { background:#334155; }
+        .btn.soft { background:#e2e8f0; color:#0f172a; }
+        .list { margin: 0; padding-left: 18px; color: #334155; line-height: 1.7; }
+        .kv { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; }
+        .kv th, .kv td { border:1px solid #e5e7eb; padding: 8px 10px; font-size: 13px; text-align:left; vertical-align: top; }
+        .kv th { width: 7.5em; background: #f8fafc; white-space: nowrap; }
+        .kv td { background: #fff; }
+        .table-wrap { overflow:auto; }
+        .records { width:100%; border-collapse: collapse; margin-top: 8px; }
+        .records th, .records td { border-bottom:1px solid #e5e7eb; padding: 10px 8px; font-size: 13px; text-align:left; }
+        .records th { color: var(--muted); font-weight: 600; }
+        .tag { display:inline-block; padding:3px 8px; border-radius:999px; background:#f1f5f9; color:#334155; font-size:12px; }
+        .ai-box { padding:14px; border-radius:16px; border:1px solid rgba(15,118,110,.18); background: linear-gradient(180deg, rgba(236,253,245,.82), #fff); }
+        .filter-bar { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1.4fr auto auto; gap:10px; margin-top: 10px; }
+        @media (max-width: 960px) {
+            .hero, .section-grid, .subgrid, .grid4, .form-grid, .form-grid-3, .filter-bar { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="topbar">
+            <div class="title">
+                <a href="{{ finance_back_url }}?lang={{ lang }}" class="back">← {{ texts.get('back_home', '返回首页') }}</a>
+                <h1>{{ texts.get('finance_workbench_title', '财务工作台') }}</h1>
+                <p>{{ texts.get('finance_workbench_desc', '围绕工厂当前提升重点统一查看资金、现金流、成本和执行建议。') }}</p>
+            </div>
+            <div class="chip">{{ texts.get('intelligence_panel_title', 'AI建议') }} · {{ finance.ai_finance.summary }}</div>
+        </div>
+
+        {% if result_msg %}<div class="msg-ok">{{ result_msg }}</div>{% endif %}
+        {% if error_msg %}<div class="msg-err">{{ error_msg }}</div>{% endif %}
+
+        <div class="hero">
+            <div class="card">
+                <h2>{{ texts.get('finance_overview_title', '财务总览') }}</h2>
+                <div class="grid4">
+                    <div class="metric"><div class="k">{{ texts.get('finance_cash_balance', '现金余额') }}</div><div class="v">{{ '%.2f'|format(finance.accounts.cash) }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('finance_bank_balance', '银行余额') }}</div><div class="v">{{ '%.2f'|format(finance.accounts.bank) }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('finance_total_balance', '可用总额') }}</div><div class="v">{{ '%.2f'|format(finance.accounts.total) }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('finance_today_net', '今日净额') }}</div><div class="v">{{ '%.2f'|format(finance.today.net) }}</div></div>
+                </div>
+                <div class="subgrid" style="margin-top:12px;">
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_today_title', '今日现金流') }}</h3>
+                        <table class="kv">
+                            <tr><th>{{ texts.get('finance_income', '收入') }}</th><td>{{ '%.2f'|format(finance.today.income) }}</td></tr>
+                            <tr><th>{{ texts.get('finance_expense', '支出') }}</th><td>{{ '%.2f'|format(finance.today.expense) }}</td></tr>
+                            <tr><th>{{ texts.get('finance_net', '净额') }}</th><td>{{ '%.2f'|format(finance.today.net) }}</td></tr>
+                        </table>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_month_title', '本月现金流') }}</h3>
+                        <table class="kv">
+                            <tr><th>{{ texts.get('finance_income', '收入') }}</th><td>{{ '%.2f'|format(finance.month.income) }}</td></tr>
+                            <tr><th>{{ texts.get('finance_expense', '支出') }}</th><td>{{ '%.2f'|format(finance.month.expense) }}</td></tr>
+                            <tr><th>{{ texts.get('finance_net', '净额') }}</th><td>{{ '%.2f'|format(finance.month.net) }}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card ai-box">
+                <h2>{{ texts.get('finance_ai_title', 'AI财务建议') }}</h2>
+                <div class="muted">{{ texts.get('finance_ai_hint', 'AI 会结合财务现状和工厂当前提升重点，给出财务动作建议。') }}</div>
+                <div style="margin-top:12px; line-height:1.75;">{{ finance.ai_finance.summary }}</div>
+                <div style="margin-top:12px; font-weight:600;">{{ texts.get('finance_support_focus', '围绕当前提升重点，财务应配合') }}</div>
+                <div style="margin-top:6px; line-height:1.75;">{{ finance.ai_finance.support }}</div>
+                <div style="margin-top:12px; font-weight:600;">{{ texts.get('risk_alerts_title', '风险预警') }}</div>
+                <ul class="list">
+                    {% for item in finance.ai_finance.risks %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                <div style="margin-top:12px; font-weight:600;">{{ texts.get('intelligence_processing_advice', '处理建议') }}</div>
+                <ul class="list">
+                    {% for item in finance.ai_finance.actions %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="section-grid">
+            <div class="card" style="margin-top:14px;">
+                <h2>{{ texts.get('finance_month_close_title', '月结总览') }}</h2>
+                <div class="muted">{{ finance.month_close.summary }}</div>
+                <table class="kv">
+                    <tr><th>{{ texts.get('finance_income', '收入') }}</th><td>{{ '%.2f'|format(finance.month_close.month_income) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_expense', '支出') }}</th><td>{{ '%.2f'|format(finance.month_close.month_expense) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_net', '净额') }}</th><td>{{ '%.2f'|format(finance.month_close.month_net) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_receivable_title', '应收') }}</th><td>{{ '%.2f'|format(finance.month_close.open_receivable) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_payable_title', '应付') }}</th><td>{{ '%.2f'|format(finance.month_close.open_payable) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_cost_total', '成本合计') }}</th><td>{{ '%.2f'|format(finance.month_close.cost_total) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_projected_close', '预估月结头寸') }}</th><td>{{ '%.2f'|format(finance.month_close.projected_close) }}</td></tr>
+                </table>
+                <ul class="list" style="margin-top:10px;">
+                    {% for item in finance.month_close.advice %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <div class="card" style="margin-top:14px;">
+                <h2>{{ texts.get('weekly_progress_title', '本周提升跟踪') }}</h2>
+                <div class="muted">{{ factory_intelligence.weekly_progress.summary if factory_intelligence and factory_intelligence.weekly_progress else '-' }}</div>
+                {% if factory_intelligence and factory_intelligence.weekly_progress %}
+                <table class="kv">
+                    <tr><th>{{ texts.get('intelligence_root_cause', '优先提升环节') }}</th><td>{{ factory_intelligence.weekly_progress.lag_stage.name }}</td></tr>
+                    <tr><th>{{ texts.get('finance_weekly_best_stage', '提升最好环节') }}</th><td>{{ factory_intelligence.weekly_progress.lead_stage.name }}</td></tr>
+                    <tr><th>{{ texts.get('finance_weekly_output', '本周成品产出') }}</th><td>{{ '%.1f'|format(factory_intelligence.weekly_progress.product_week_m3 or 0) }} m3</td></tr>
+                    <tr><th>{{ texts.get('finance_weekly_mom', '周环比') }}</th><td>{{ factory_intelligence.weekly_progress.product_week_mom_pct if factory_intelligence.weekly_progress.product_week_mom_pct is not none else '--' }}%</td></tr>
+                </table>
+                <ul class="list" style="margin-top:10px;">
+                    {% for item in factory_intelligence.weekly_progress.actions %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="section-grid">
+            <div class="card">
+                <h2>{{ texts.get('finance_actions_title', '财务操作') }}</h2>
+                <div class="subgrid">
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_income', '收入') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="income">
+                            <div class="form-grid">
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <select name="account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                <select name="category">{% for item in finance.income_categories %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                            </div>
+                            <textarea name="note" placeholder="{{ texts.get('remark_label', '备注') }}" required></textarea>
+                            <div class="actions"><button class="btn" type="submit">{{ texts.get('finance_submit_income', '登记收入') }}</button></div>
+                        </form>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_expense', '支出') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="expense">
+                            <div class="form-grid">
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <select name="account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                <select name="category">{% for item in finance.expense_categories %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                            </div>
+                            <textarea name="note" placeholder="{{ texts.get('remark_label', '备注') }}" required></textarea>
+                            <div class="actions"><button class="btn" type="submit">{{ texts.get('finance_submit_expense', '登记支出') }}</button></div>
+                        </form>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_transfer', '转账') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="transfer">
+                            <div class="form-grid-3">
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <select name="src_account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ texts.get('finance_from_account', '从') }} {{ item.label }}</option>{% endfor %}</select>
+                                <select name="dst_account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ texts.get('finance_to_account', '到') }} {{ item.label }}</option>{% endfor %}</select>
+                            </div>
+                            <div class="form-grid">
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                                <input type="text" name="note" placeholder="{{ texts.get('remark_label', '备注') }}">
+                            </div>
+                            <div class="actions"><button class="btn secondary" type="submit">{{ texts.get('finance_submit_transfer', '提交转账') }}</button></div>
+                        </form>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_cost_entry', '成本录入') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="cost">
+                            <div class="form-grid">
+                                <select name="cost_key">
+                                    <option value="raw_material">{{ texts.get('finance_cost_raw', '原料成本') }}</option>
+                                    <option value="labor">{{ texts.get('finance_cost_labor', '人工成本') }}</option>
+                                    <option value="energy">{{ texts.get('finance_cost_energy', '能源成本') }}</option>
+                                </select>
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <select name="account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                <select name="category">{% for item in finance.expense_categories %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                            </div>
+                            <div class="form-grid">
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                                <label class="muted" style="display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid #dbe3ef; border-radius:12px;">
+                                    <input type="checkbox" name="sync_expense" value="1" checked style="width:auto;">
+                                    {{ texts.get('finance_sync_expense', '同步记入支出流水') }}
+                                </label>
+                            </div>
+                            <textarea name="note" placeholder="{{ texts.get('remark_label', '备注') }}"></textarea>
+                            <div class="actions"><button class="btn soft" type="submit">{{ texts.get('finance_submit_cost', '登记成本') }}</button></div>
+                        </form>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_receivable_title', '应收') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="receivable_add">
+                            <div class="form-grid">
+                                <input type="text" name="party" placeholder="{{ texts.get('finance_party', '往来单位') }}" required>
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <input type="date" name="due_date">
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                            </div>
+                            <textarea name="note" placeholder="{{ texts.get('remark_label', '备注') }}"></textarea>
+                            <div class="actions"><button class="btn" type="submit">{{ texts.get('finance_add_receivable', '登记应收') }}</button></div>
+                        </form>
+                    </div>
+                    <div class="card" style="padding:14px;">
+                        <h3>{{ texts.get('finance_payable_title', '应付') }}</h3>
+                        <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}">
+                            <input type="hidden" name="form_action" value="payable_add">
+                            <div class="form-grid">
+                                <input type="text" name="party" placeholder="{{ texts.get('finance_party', '往来单位') }}" required>
+                                <input type="number" step="0.01" min="0.01" name="amount" placeholder="{{ texts.get('finance_amount_placeholder', '金额') }}" required>
+                                <input type="date" name="due_date">
+                                <input type="text" name="ref_no" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}">
+                            </div>
+                            <textarea name="note" placeholder="{{ texts.get('remark_label', '备注') }}"></textarea>
+                            <div class="actions"><button class="btn secondary" type="submit">{{ texts.get('finance_add_payable', '登记应付') }}</button></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>{{ texts.get('finance_costs_title', '成本与结构') }}</h2>
+                <table class="kv">
+                    <tr><th>{{ texts.get('finance_cost_raw', '原料成本') }}</th><td>{{ '%.2f'|format(finance.costs.raw_material) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_cost_labor', '人工成本') }}</th><td>{{ '%.2f'|format(finance.costs.labor) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_cost_energy', '能源成本') }}</th><td>{{ '%.2f'|format(finance.costs.energy) }}</td></tr>
+                    <tr><th>{{ texts.get('finance_cost_total', '成本合计') }}</th><td>{{ '%.2f'|format(finance.costs.total) }}</td></tr>
+                </table>
+                <h3 style="margin-top:16px;">{{ texts.get('finance_expense_breakdown', '本月支出结构') }}</h3>
+                <div class="table-wrap">
+                    <table class="records">
+                        <thead><tr><th>{{ texts.get('category_label', '分类') }}</th><th>{{ texts.get('finance_amount', '金额') }}</th></tr></thead>
+                        <tbody>
+                            {% for item in finance.expense_breakdown %}
+                            <tr><td>{{ item.label }}</td><td>{{ '%.2f'|format(item.amount) }}</td></tr>
+                            {% endfor %}
+                            {% if not finance.expense_breakdown %}
+                            <tr><td colspan="2" class="muted">{{ texts.get('finance_no_breakdown', '暂无支出结构数据') }}</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-grid">
+            <div class="card" style="margin-top:14px;">
+                <h2>{{ texts.get('finance_open_items_title', '未结往来') }}</h2>
+                <div class="table-wrap">
+                    <table class="records">
+                        <thead>
+                            <tr>
+                                <th>{{ texts.get('type_label', '类型') }}</th>
+                                <th>{{ texts.get('finance_party', '往来单位') }}</th>
+                                <th>{{ texts.get('finance_amount', '金额') }}</th>
+                                <th>{{ texts.get('finance_settled_amount', '已结') }}</th>
+                                <th>{{ texts.get('finance_remaining_amount', '未结') }}</th>
+                                <th>{{ texts.get('report_date_label', '日期') }}</th>
+                                <th>{{ texts.get('finance_actions_title', '财务操作') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in finance.arap.open %}
+                            <tr>
+                                <td><span class="tag">{{ row.title }}</span></td>
+                                <td>{{ row.party or '-' }}</td>
+                                <td>{{ '%.2f'|format(row.amount or 0) }}</td>
+                                <td>{{ '%.2f'|format(row.settled_amount or 0) }}</td>
+                                <td>{{ '%.2f'|format(row.remaining_amount or 0) }}</td>
+                                <td>{{ row.due_date or '-' }}</td>
+                                <td>
+                                    <form method="POST" action="{{ url_for('admin_finance', lang=lang) }}" style="display:grid; gap:8px;">
+                                        <input type="hidden" name="form_action" value="{{ 'receivable_settle' if row.kind == 'receivable' else 'payable_settle' }}">
+                                        <input type="hidden" name="item_id" value="{{ row.id }}">
+                                        <select name="settle_account">{% for item in finance.account_choices %}<option value="{{ item.value }}">{{ item.label }}</option>{% endfor %}</select>
+                                        <input type="number" step="0.01" min="0.01" max="{{ row.remaining_amount }}" name="settle_amount" value="{{ row.remaining_amount }}">
+                                        <input type="text" name="settle_note" placeholder="{{ texts.get('remark_label', '备注') }}">
+                                        <button class="btn soft" type="submit">{{ texts.get('finance_settle_btn', '结清') }}</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% if not finance.arap.open %}
+                            <tr><td colspan="7" class="muted">{{ texts.get('finance_no_open_items', '暂无未结往来') }}</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" style="margin-top:14px;">
+                <h2>{{ texts.get('finance_recent_records', '最近流水') }}</h2>
+                <form method="GET" action="{{ url_for('admin_finance', lang=lang) }}">
+                    <div class="filter-bar">
+                        <input type="date" name="date_from" value="{{ finance.record_filter.date_from or '' }}">
+                        <input type="date" name="date_to" value="{{ finance.record_filter.date_to or '' }}">
+                        <select name="record_type">
+                            <option value="">{{ texts.get('all_label', '全部') }}{{ texts.get('type_label', '类型') }}</option>
+                            <option value="income" {% if finance.record_filter.record_type == 'income' %}selected{% endif %}>{{ texts.get('finance_income', '收入') }}</option>
+                            <option value="expense" {% if finance.record_filter.record_type == 'expense' %}selected{% endif %}>{{ texts.get('finance_expense', '支出') }}</option>
+                            <option value="transfer" {% if finance.record_filter.record_type == 'transfer' %}selected{% endif %}>{{ texts.get('finance_transfer', '转账') }}</option>
+                        </select>
+                        <select name="account">
+                            <option value="">{{ texts.get('all_label', '全部') }}{{ texts.get('account_label', '账户') }}</option>
+                            {% for item in finance.account_choices %}
+                            <option value="{{ item.value }}" {% if finance.record_filter.account == item.value %}selected{% endif %}>{{ item.label }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="text" name="keyword" value="{{ finance.record_filter.keyword or '' }}" placeholder="{{ texts.get('finance_filter_keyword', '备注/单号/分类关键词') }}">
+                        <button type="submit" class="btn">{{ texts.get('search_btn', '查询') }}</button>
+                        <a href="{{ url_for('admin_finance', lang=lang) }}" class="btn soft">{{ texts.get('reset_btn', '重置') }}</a>
+                    </div>
+                </form>
+                <div class="table-wrap">
+                    <table class="records">
+                        <thead>
+                            <tr>
+                                <th>{{ texts.get('time_label', '时间') }}</th>
+                                <th>{{ texts.get('type_label', '类型') }}</th>
+                                <th>{{ texts.get('category_label', '分类') }}</th>
+                                <th>{{ texts.get('account_label', '账户') }}</th>
+                                <th>{{ texts.get('finance_amount', '金额') }}</th>
+                                <th>{{ texts.get('finance_ref_no', '单号/参考号') }}</th>
+                                <th>{{ texts.get('remark_label', '备注') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in finance.recent_records %}
+                            <tr>
+                                <td>{{ row.time_text }}</td>
+                                <td><span class="tag">{{ row.type }}</span></td>
+                                <td>{{ row.category_label or '-' }}</td>
+                                <td>{{ row.account_label or '-' }}</td>
+                                <td>{{ '%.2f'|format(row.amount or 0) }}</td>
+                                <td>{{ row.ref_no or '-' }}</td>
+                                <td>{{ row.note or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if not finance.recent_records %}
+                            <tr><td colspan="7" class="muted">{{ texts.get('finance_no_records', '暂无财务流水') }}</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:14px;">
+                <h2>{{ texts.get('finance_payroll_batches', '发薪批次') }}</h2>
+                <div class="table-wrap">
+                    <table class="records">
+                        <thead>
+                            <tr>
+                                <th>{{ texts.get('time_label', '时间') }}</th>
+                                <th>{{ texts.get('finance_ref_no', '单号/参考号') }}</th>
+                                <th>{{ texts.get('report_date_label', '日期') }}</th>
+                                <th>{{ texts.get('hr_name', '员工') }}</th>
+                                <th>{{ texts.get('hr_employee_total', '员工总数') }}</th>
+                                <th>{{ texts.get('finance_amount', '金额') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in finance.payroll_batches %}
+                            <tr>
+                                <td>{{ row.posted_at_text }}</td>
+                                <td>{{ row.batch_ref }}</td>
+                                <td>{{ row.asof }}</td>
+                                <td>{{ row.scope }}</td>
+                                <td>{{ row.employee_count }}</td>
+                                <td>{{ '%.2f'|format(row.total_amount or 0) }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if not finance.payroll_batches %}
+                            <tr><td colspan="6" class="muted">{{ texts.get('finance_no_payroll_batches', '暂无发薪批次') }}</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -25,6 +25,7 @@
         <div class="nav">
             <a href="{{ url_for('admin_root') }}">{{ texts.get('admin_overview_title', '管理总览') }}</a>
             <a href="{{ url_for('admin_hr_attendance') }}">{{ texts.get('attendance_mgmt_link', '考勤管理') }}</a>
+            <a href="{{ url_for('admin_finance') }}">{{ texts.get('finance_workbench_title', '财务工作台') }}</a>
             <a href="{{ url_for('admin_hr_employees') }}">{{ texts.get('employee_mgmt_link', '员工管理') }}</a>
             <a href="{{ url_for('admin_users') }}">{{ texts.get('user_management', '用户管理') }}</a>
             <a href="{{ url_for('admin_audit_logs') }}">{{ texts.get('audit_logs', '审计日志') }}</a>
@@ -42,6 +43,7 @@
         <div class="panel">
             <strong>{{ texts.get('admin_quick_links', '快捷入口') }}</strong><br>
             <a class="btn" href="{{ url_for('admin_hr_attendance') }}">{{ texts.get('attendance_mgmt_link', '考勤管理') }}</a>
+            <a class="btn" href="{{ url_for('admin_finance') }}">{{ texts.get('finance_workbench_title', '财务工作台') }}</a>
             <a class="btn" href="{{ url_for('admin_hr_employees') }}">{{ texts.get('admin_quick_hr_employees', '员工档案管理') }}</a>
             <a class="btn" href="{{ url_for('admin_users') }}">{{ texts.get('admin_quick_users_security', '用户与账号安全') }}</a>
             <a class="btn" href="{{ url_for('admin_audit_logs') }}">{{ texts.get('admin_quick_audit', '审计日志查询') }}</a>

@@ -29,6 +29,7 @@ from web.templates_admin import (
     ADMIN_HR_SETTINGS_TEMPLATE,
     ADMIN_HR_EMPLOYEES_TEMPLATE,
     ADMIN_HR_ATTENDANCE_TEMPLATE,
+    ADMIN_FINANCE_TEMPLATE,
 )
 from modules.hr.hr_engine import (
     add_hr_attendance_from_admin,
@@ -51,10 +52,230 @@ from web.services.alert_center_service import (
     set_alert_silence,
     update_alert_event,
 )
+from web.services.ai_monitor_service import get_cached_deep_monitor
+from web.services.finance_service import get_finance_dashboard_payload, apply_finance_form, post_payroll_to_finance
 from web.services.period_report_service import get_period_report_links
 from web.services.tg_login_token_service import verify_tg_login_token
 
 logger = logging.getLogger("aif.web")
+
+
+def _build_hr_ai_insight(payload: dict, lang: str = "zh") -> dict:
+    rows = payload.get("rows", []) if isinstance(payload.get("rows"), list) else []
+    active_rows = [row for row in rows if isinstance(row, dict) and str(row.get("status", "") or "") != "离职"]
+    by_code: dict[str, int] = {}
+    team_gap: dict[str, int] = {}
+    for row in active_rows:
+        code = str(row.get("today_attendance_status", "") or "absent").strip() or "absent"
+        team = str(row.get("team", "") or "").strip() or "未分组"
+        by_code[code] = by_code.get(code, 0) + 1
+        if code in ("absent", "leave", "sick", "rest"):
+            team_gap[team] = team_gap.get(team, 0) + 1
+
+    active_total = len(active_rows)
+    present_count = sum(by_code.get(key, 0) for key in ("present", "lunch", "overtime"))
+    off_count = by_code.get("off", 0)
+    absent_count = by_code.get("absent", 0)
+    leave_count = by_code.get("leave", 0)
+    sick_count = by_code.get("sick", 0)
+    rest_count = by_code.get("rest", 0)
+    overtime_count = by_code.get("overtime", 0)
+    gap_team = max(team_gap.items(), key=lambda item: item[1])[0] if team_gap else ""
+    gap_count = team_gap.get(gap_team, 0) if gap_team else 0
+    gap_ratio = (gap_count / active_total) if active_total > 0 else 0.0
+    leave_total = absent_count + leave_count + sick_count + rest_count
+    leave_ratio = (leave_total / active_total) if active_total > 0 else 0.0
+
+    if lang == "en":
+        summary = f"{present_count}/{active_total} active staff are available today."
+        if leave_total <= 0:
+            summary += " Attendance is steady and current staffing can follow the planned schedule."
+        elif gap_team:
+            summary += f" The main staffing gap is in {gap_team}, so HR should rebalance coverage there first."
+        else:
+            summary += " HR should confirm leave coverage before the next shift handoff."
+        risks: list[str] = []
+        actions: list[str] = []
+        if gap_team and gap_ratio >= 0.15:
+            risks.append(f"{gap_team} has {gap_count} staff unavailable today, which may affect handoff or output.")
+            actions.append(f"Move backup staff or cross-support into {gap_team} before the next work segment.")
+        if sick_count > 0:
+            risks.append(f"{sick_count} sick leave case(s) need shift coverage and follow-up.")
+            actions.append("Confirm medical leave coverage and avoid assigning overload to the same team.")
+        if leave_ratio >= 0.25:
+            risks.append("Overall staffing pressure is high today, so fixed scheduling may not hold.")
+            actions.append("Re-check team allocation and keep only critical work on the main line.")
+        if overtime_count >= 2:
+            risks.append(f"{overtime_count} staff are already in overtime; fatigue risk is rising.")
+            actions.append("Track overtime duration and prepare a checkout or relief plan.")
+        if off_count >= max(2, active_total // 3) and present_count <= max(1, active_total // 2):
+            risks.append("More staff have already checked out while on-shift coverage is thinning.")
+            actions.append("Verify whether remaining on-duty staffing still matches production demand.")
+        if not risks and gap_team and gap_count > 0:
+            risks.append(f"{gap_team} is short by {gap_count} staff today, so HR should watch that handoff first.")
+        if not risks:
+            risks.append("HR attendance is stable for now, with no major staffing gap detected.")
+        if not actions:
+            actions.append("Keep current staffing and continue watching leave, lunch, and overtime changes.")
+        title = "AI HR Judgment"
+        scope = "Attendance / HR"
+        summary_label = "HR Summary"
+    elif lang == "my":
+        summary = f"ဒီနေ့ အလုပ်လုပ်နိုင်သူ {present_count}/{active_total} ယောက် ရှိပါသည်။"
+        if leave_total <= 0:
+            summary += " လက်ရှိတက်ရောက်မှုတည်ငြိမ်ပြီး မူလအလုပ်အစီအစဉ်အတိုင်း ဆက်သွားနိုင်ပါသည်။"
+        elif gap_team:
+            summary += f" လူအင်အားအနည်းဆုံးဖြစ်နေသောအဖွဲ့မှာ {gap_team} ဖြစ်ပြီး HR က အဲဒီအဖွဲ့ကို အရင်ညှိသင့်ပါသည်။"
+        else:
+            summary += " နောက်တစ်ကြိမ် shift လွှဲပြောင်းမတိုင်မီ ခွင့်နှင့် မတက်ရောက်မှုအစားထိုးမှုကို အရင်အတည်ပြုသင့်ပါသည်။"
+        risks = []
+        actions = []
+        if gap_team and gap_ratio >= 0.15:
+            risks.append(f"{gap_team} တွင် ယနေ့ လူမရှိသူ {gap_count} ယောက်ရှိပြီး output သို့မဟုတ် handoff ကို ထိခိုက်နိုင်ပါသည်။")
+            actions.append(f"နောက်အလုပ်ပိုင်းမစခင် {gap_team} သို့ backup သို့မဟုတ် cross-support လူအင်အား ပြောင်းထည့်ပါ။")
+        if sick_count > 0:
+            risks.append(f"နာမကျန်းခွင့် {sick_count} ယောက် ရှိပြီး အစားထိုးအင်အား စီစဉ်ရန် လိုပါသည်။")
+            actions.append("နာမကျန်းခွင့်အတွက် coverage အတည်ပြုပြီး အဖွဲ့တစ်ဖွဲ့တည်းအပေါ် အလုပ်အလွန်အကျွံ မတင်ပါနှင့်။")
+        if leave_ratio >= 0.25:
+            risks.append("ဒီနေ့ လူအင်အားဖိအားမြင့်နေပြီး မူသတ်မှတ်ထားသော shift အစီအစဉ် မအောင်မြင်နိုင်ပါ။")
+            actions.append("အဖွဲ့ခွဲဝေမှုကို ပြန်စစ်ပြီး အဓိကလုပ်ငန်းများကိုသာ main line ပေါ်တွင် ထားပါ။")
+        if overtime_count >= 2:
+            risks.append(f"အချိန်ပိုလုပ်နေသူ {overtime_count} ယောက်ရှိပြီး ပင်ပန်းမှု risk မြင့်လာနေပါသည်။")
+            actions.append("အချိန်ပိုကြာချိန်ကို စောင့်ကြည့်ပြီး အလုပ်ဆင်း သို့မဟုတ် အစားထိုးအစီအစဉ် ပြင်ဆင်ပါ။")
+        if off_count >= max(2, active_total // 3) and present_count <= max(1, active_total // 2):
+            risks.append("အလုပ်ဆင်းပြီးသူများ များလာသော်လည်း line ပေါ်တွင် ကျန်ရှိသူနည်းလာနေပါသည်။")
+            actions.append("ကျန် duty လူအင်အားက လက်ရှိထုတ်လုပ်မှုလိုအပ်ချက်ကို လုံလောက်သလား ပြန်စစ်ပါ။")
+        if not risks and gap_team and gap_count > 0:
+            risks.append(f"{gap_team} တွင် ယနေ့ လူအင်အား {gap_count} ယောက် လျော့နေသဖြင့် အဲဒီ handoff ကို အရင်စောင့်ကြည့်သင့်ပါသည်။")
+        if not risks:
+            risks.append("HR တက်ရောက်မှုအခြေအနေ လက်ရှိတည်ငြိမ်ပြီး ကြီးမားသော လူအင်အားကွာဟချက် မတွေ့ရပါ။")
+        if not actions:
+            actions.append("လက်ရှိအင်အားအတိုင်း ဆက်ထိန်းပြီး ခွင့်၊ နေ့လယ်နားချိန် နှင့် အချိန်ပိုပြောင်းလဲမှုကို ဆက်ကြည့်ပါ။")
+        title = "AI HR သုံးသပ်ချက်"
+        scope = "Attendance / HR"
+        summary_label = "HR အကျဉ်းချုပ်"
+    else:
+        summary = f"今日可投入 {present_count}/{active_total} 人。"
+        if leave_total <= 0:
+            summary += " 出勤整体平稳，人事侧暂时可以按原排班执行。"
+        elif gap_team:
+            summary += f" 当前人手缺口主要集中在「{gap_team}」，人事应优先处理这个班组的补位和调班。"
+        else:
+            summary += " 人事侧应先确认请假与缺勤是否已经完成替补。"
+        risks = []
+        actions = []
+        if gap_team and gap_ratio >= 0.15:
+            risks.append(f"「{gap_team}」今日缺口 {gap_count} 人，可能直接影响交接节拍或产出。")
+            actions.append(f"优先给「{gap_team}」补人，必要时从相邻班组临时支援。")
+        if sick_count > 0:
+            risks.append(f"病假 {sick_count} 人，需确认是否已经安排替岗，避免同班组持续吃紧。")
+            actions.append("先落实病假替岗，再避免把额外负荷继续压在同一批人身上。")
+        if leave_ratio >= 0.25:
+            risks.append("今日请假/缺勤占比较高，按原排班硬跑，后续大概率会顶不住。")
+            actions.append("重新核对今日班组分配，只保留关键岗位满配，非关键工作适当顺延。")
+        if overtime_count >= 2:
+            risks.append(f"当前已有 {overtime_count} 人处于加班中，人事需要注意疲劳和后续轮休。")
+            actions.append("加班要同步安排下班和轮休，避免第二天继续透支同一批人。")
+        if off_count >= max(2, active_total // 3) and present_count <= max(1, active_total // 2):
+            risks.append("已下班人数开始偏多，但在岗人数下降明显，要确认是否会影响后半段安排。")
+            actions.append("检查已下班与仍在岗人员分布，确认当前班次是否还覆盖关键岗位。")
+        if not risks and gap_team and gap_count > 0:
+            risks.append(f"「{gap_team}」今天有 {gap_count} 人缺口，虽然不算严重，但人事应先盯这个班组的交接。")
+        if not risks:
+            risks.append("当前人事侧没有明显异常，重点继续盯请假、休息和加班变化即可。")
+        if not actions:
+            actions.append("按当前排班继续执行，同时保持对请假、病假和加班变化的跟踪。")
+        title = "AI人事判断"
+        scope = "考勤管理 / HR"
+        summary_label = "人事摘要"
+
+    return {
+        "title": title,
+        "scope": scope,
+        "summary_label": summary_label,
+        "summary": summary,
+        "risks": risks[:3],
+        "actions": actions[:3],
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "trigger": "attendance-live",
+    }
+
+
+def _build_role_support_insight(factory_intelligence: dict, role_key: str, lang: str = "zh") -> dict:
+    root = (factory_intelligence or {}).get("root_bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    root_name = str(root.get("name") or "").strip()
+    root_reason = str(root.get("reason") or "").strip()
+    symptom = (factory_intelligence or {}).get("bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    symptom_name = str(symptom.get("name") or "").strip()
+    role = str(role_key or "").strip().lower()
+
+    if lang == "en":
+        idle_summary = "The plant's priority improvement stage is not clear enough yet, so keep this role aligned with current plans."
+        if role == "hr":
+            if "Back" in root_name or "后段" in root_name:
+                return {
+                    "summary": f"The plant's current improvement priority is {root_name}. HR should protect kiln-out handover, secondary sorting, and finished push with staffing support.",
+                    "action": "Prioritize staffing for the secondary-sort, handover, and finished-goods teams. Delay non-critical leave changes if they would weaken that line.",
+                }
+            if "Middle" in root_name or "中段" in root_name:
+                return {
+                    "summary": f"The plant's current improvement priority is {root_name}. HR should reinforce sorting, kiln loading, and kiln-out shift continuity.",
+                    "action": "Keep key middle-stage positions filled through lunch, shift handoff, and early overtime if needed.",
+                }
+            if "Front" in root_name or "前段" in root_name:
+                return {
+                    "summary": f"The plant's current improvement priority is {root_name}. HR should first stabilize sawing and dipping attendance.",
+                    "action": "Protect core attendance in sawing, dipping, forklift, and material handling before reallocating anyone elsewhere.",
+                }
+        return {
+            "summary": idle_summary,
+            "action": f"Keep this role coordinated with the plant's current improvement priority. Pressure stage: {symptom_name or '-'}; basis: {root_reason or '-'}",
+        }
+
+    if lang == "my":
+        idle_summary = "စက်ရုံတစ်ခုလုံးရဲ့ လက်ရှိတိုးမြှင့်ဦးစားပေးအပိုင်းကို လောလောဆယ် မရှင်းသေးလို့ ဒီ role ကို လက်ရှိအစီအစဉ်နဲ့ ကိုက်ညီအောင် ထိန်းထားပါ။"
+        if role == "hr":
+            if "Back" in root_name or "后段" in root_name:
+                return {
+                    "summary": f"စက်ရုံရဲ့ လက်ရှိတိုးမြှင့်ဦးစားပေးအပိုင်းမှာ {root_name} ဖြစ်ပါသည်။ HR က မီးဖိုထွက်လက်ခံ၊ ဒုတိယရွေး နဲ့ ကုန်ချောတင်ဆက်မှုအတွက် လူအင်အားထောက်ပံ့ပေးသင့်ပါသည်။",
+                    "action": "ဒုတိယရွေး၊ handoff နှင့် finished-goods အဖွဲ့များကို အရင်လူဖြည့်ပါ။ အဲဒီ line ကို အားနည်းစေမယ့် non-critical leave ပြောင်းလဲမှုများကို ယာယီနောက်ဆုတ်ပါ။",
+                }
+            if "Middle" in root_name or "中段" in root_name:
+                return {
+                    "summary": f"စက်ရုံရဲ့ လက်ရှိတိုးမြှင့်ဦးစားပေးအပိုင်းမှာ {root_name} ဖြစ်ပါသည်။ HR က ရွေးချယ်မှု၊ မီးဖိုတင်ခြင်း နှင့် မီးဖိုထွက် shift continuity ကို အရင်ထိန်းသင့်ပါသည်။",
+                    "action": "နေ့လယ်နားချိန်၊ shift လွှဲချိန် နှင့် လိုအပ်ပါက အချိန်ပိုအထိ အဓိက middle-stage လူနေရာများ မလွတ်စေပါနှင့်။",
+                }
+            if "Front" in root_name or "前段" in root_name:
+                return {
+                    "summary": f"စက်ရုံရဲ့ လက်ရှိတိုးမြှင့်ဦးစားပေးအပိုင်းမှာ {root_name} ဖြစ်ပါသည်။ HR က လွှဖြတ်နှင့် ဆေးစိမ် attendance ကို အရင်တည်ငြိမ်အောင် လုပ်သင့်ပါသည်။",
+                    "action": "လွှဖြတ်၊ ဆေးစိမ်၊ forklift နှင့် material handling အဖွဲ့ attendance ကို အရင်ကာကွယ်ပြီးမှ အခြားအဖွဲ့များသို့ လူရွှေ့ပါ။",
+                }
+        return {
+            "summary": idle_summary,
+            "action": f"ဒီ role ကို လက်ရှိစက်ရုံတိုးမြှင့်ဦးစားပေးအပိုင်းနဲ့ ကိုက်ညီအောင် ညှိပါ။ Pressure stage: {symptom_name or '-'}; basis: {root_reason or '-'}",
+        }
+
+    idle_summary = "当前工厂最该优先提升的环节还不够明确，这个岗位先按现有安排稳定配合即可。"
+    if role == "hr":
+        if "后段" in root_name or "Back" in root_name:
+            return {
+                "summary": f"当前工厂最该优先提升的环节更像在「{root_name}」，HR 要做的不是单看考勤，而是优先保障出窑承接、二选和成品推进的人手不断档。",
+                "action": "先把二选、出窑承接、成品推进相关班组的人手补齐，非关键岗位的调休和请假先往后让。"
+            }
+        if "中段" in root_name or "Middle" in root_name:
+            return {
+                "summary": f"当前工厂最该优先提升的环节更像在「{root_name}」，HR 应重点保住拣选、装窑、出窑这条线的人手连续性。",
+                "action": "优先保障中段关键岗位在午餐、交班和16点后不掉人，必要时提前安排加班接力。"
+            }
+        if "前段" in root_name or "Front" in root_name:
+            return {
+                "summary": f"当前工厂最该优先提升的环节更像在「{root_name}」，HR 应先稳住锯解、药浸、叉车和转运这些前段供料岗位。",
+                "action": "先保证前段核心岗位满配，再考虑把人调去别的环节，避免上游先掉速。"
+            }
+    return {
+        "summary": idle_summary,
+        "action": f"让这个岗位围绕当前提升重点协同配合。当前压力位置：{symptom_name or '-'}；依据：{root_reason or '-'}",
+    }
 
 
 def _verify_tg_init_data(init_data: str, bot_token: str, max_age_seconds: int = 6 * 3600) -> dict | None:
@@ -211,6 +432,10 @@ def register_auth_admin_routes(app, translate):
 
     def _can_access_hr_attendance() -> bool:
         return _can_access_hr_employees()
+
+    def _can_access_finance() -> bool:
+        role = str(getattr(current_user, "role", "") or "").strip().lower()
+        return bool(current_user.has_permission("admin") or role in ("finance",))
 
     def _localize_hr_option(value: str, kind: str, lang: str) -> str:
         raw = str(value or "").strip()
@@ -824,11 +1049,14 @@ def register_auth_admin_routes(app, translate):
         texts = LANGUAGES.get(lang, LANGUAGES["zh"])
         result_msg, error_msg = _pull_page_messages()
         data = _attach_hr_choice_labels(get_hr_employees_payload(), lang)
+        ai_deep_monitor = get_cached_deep_monitor(lang)
+        hr_ai_insight = _build_hr_ai_insight(data, lang)
         if request.method == "POST":
             form_action = str(request.form.get("form_action", "add") or "add").strip()
             if form_action == "edit":
                 ok, msg, payload = update_hr_employee_from_admin(
                     original_name=request.form.get("original_name", ""),
+                    name=request.form.get("name", ""),
                     team=request.form.get("team", ""),
                     position=request.form.get("position", ""),
                     salary_type=request.form.get("salary_type", ""),
@@ -858,6 +1086,7 @@ def register_auth_admin_routes(app, translate):
                         "update_hr_employee",
                         target=str(request.form.get("original_name", "") or ""),
                         detail=(
+                            f"name={request.form.get('name','')},"
                             f"team={request.form.get('team','')},"
                             f"position={request.form.get('position','')},"
                             f"salary_type={request.form.get('salary_type','')},"
@@ -912,6 +1141,11 @@ def register_auth_admin_routes(app, translate):
         export_action = str(request.args.get("action", "") or "").strip().lower()
         result_msg, error_msg = _pull_page_messages()
         data = _attach_hr_choice_labels(get_hr_employees_payload(), lang)
+        ai_deep_monitor = get_cached_deep_monitor(lang)
+        center_payload = get_alert_center_payload(limit_recent=30, lang=lang)
+        factory_intelligence = center_payload.get("factory_intelligence", {}) if isinstance(center_payload, dict) else {}
+        hr_ai_insight = _build_hr_ai_insight(data, lang)
+        hr_role_support = _build_role_support_insight(factory_intelligence, "hr", lang)
         attendance_view_rows = get_hr_attendance_records(
             day_from=q_from,
             day_to=q_to,
@@ -927,6 +1161,8 @@ def register_auth_admin_routes(app, translate):
         data["payroll_name"] = payroll_name
         data["payroll_rows"] = payroll_preview.get("rows", [])
         data["payroll_total_net"] = payroll_preview.get("total_net", 0.0)
+        data["finance_account_choices"] = [{"value": "cash", "label": "现金账户"}, {"value": "bank", "label": "银行账户"}]
+        data["can_payroll_finance"] = _can_access_finance()
         if export_action in ("export_attendance", "export_attendance_excel", "export_payroll_excel"):
             if not bool(current_user.has_permission("export") or current_user.has_permission("admin")):
                 flash("❌ 无导出权限", "error")
@@ -1032,6 +1268,19 @@ def register_auth_admin_routes(app, translate):
                     day=request.form.get("special_task_date", ""),
                     note=request.form.get("special_task_note", ""),
                 )
+            elif form_action == "payroll_payout":
+                if not _can_access_finance():
+                    ok, msg = False, "❌ 无财务入账权限"
+                else:
+                    ok, msg = post_payroll_to_finance(
+                        asof=request.form.get("payroll_asof", ""),
+                        name=request.form.get("payroll_name", ""),
+                        account=request.form.get("payroll_account", "cash"),
+                        operator=str(getattr(current_user, "username", "") or ""),
+                        batch_ref=request.form.get("payroll_batch_ref", ""),
+                        note=request.form.get("payroll_note", ""),
+                    )
+                payload = get_hr_employees_payload()
             else:
                 ok, msg, payload = False, "❌ 未知提交类型", get_hr_employees_payload()
             data = _attach_hr_choice_labels(payload, lang)
@@ -1075,18 +1324,95 @@ def register_auth_admin_routes(app, translate):
                             f"team={task_team}"
                         ),
                     )
+                elif form_action == "payroll_payout":
+                    _audit(
+                        "payroll_post_to_finance",
+                        target=str(request.form.get("payroll_asof", "") or ""),
+                        detail=(
+                            f"name={request.form.get('payroll_name','')},"
+                            f"account={request.form.get('payroll_account','')},"
+                            f"batch_ref={request.form.get('payroll_batch_ref','')}"
+                        ),
+                    )
             else:
                 flash(msg, "error")
             return _redirect_with_lang("admin_hr_attendance")
         return render_template_string(
             ADMIN_HR_ATTENDANCE_TEMPLATE,
             data=data,
+            ai_deep_monitor=ai_deep_monitor,
+            factory_intelligence=factory_intelligence,
+            hr_ai_insight=hr_ai_insight,
+            hr_role_support=hr_role_support,
             result_msg=result_msg,
             error_msg=error_msg,
             lang=lang,
             texts=texts,
             can_manage_hr_settings=bool(current_user.has_permission("admin")),
             hr_back_url=url_for("admin_root") if current_user.has_permission("admin") else url_for("index"),
+        )
+
+    @app.route("/admin/finance", methods=["GET", "POST"])
+    @login_required
+    def admin_finance():
+        if not _can_access_finance():
+            flash(translate("no_perm"), "error")
+            return redirect(url_for("index"))
+
+        lang = get_lang()
+        texts = LANGUAGES.get(lang, LANGUAGES["zh"])
+        date_from = str(request.args.get("date_from", "") or "").strip()
+        date_to = str(request.args.get("date_to", "") or "").strip()
+        record_type = str(request.args.get("record_type", "") or "").strip()
+        account = str(request.args.get("account", "") or "").strip()
+        keyword = str(request.args.get("keyword", "") or "").strip()
+        result_msg, error_msg = _pull_page_messages()
+        center_payload = get_alert_center_payload(limit_recent=30, lang=lang)
+        factory_intelligence = center_payload.get("factory_intelligence", {}) if isinstance(center_payload, dict) else {}
+
+        if request.method == "POST":
+            ok, msg = apply_finance_form(
+                action=request.form.get("form_action", ""),
+                form=request.form,
+                operator=str(getattr(current_user, "username", "") or ""),
+            )
+            if ok:
+                flash(msg, "success")
+                _audit(
+                    "finance_action",
+                    target=str(request.form.get("form_action", "") or ""),
+                    detail=(
+                        f"amount={request.form.get('amount','')},"
+                        f"account={request.form.get('account','')},"
+                        f"src={request.form.get('src_account','')},"
+                        f"dst={request.form.get('dst_account','')},"
+                        f"category={request.form.get('category','')},"
+                        f"cost_key={request.form.get('cost_key','')},"
+                        f"ref={request.form.get('ref_no','')}"
+                    ),
+                )
+            else:
+                flash(msg, "error")
+            return _redirect_with_lang("admin_finance")
+
+        finance_payload = get_finance_dashboard_payload(
+            lang=lang,
+            factory_intelligence=factory_intelligence,
+            date_from=date_from,
+            date_to=date_to,
+            record_type=record_type,
+            account=account,
+            keyword=keyword,
+        )
+        return render_template_string(
+            ADMIN_FINANCE_TEMPLATE,
+            finance=finance_payload,
+            factory_intelligence=factory_intelligence,
+            result_msg=result_msg,
+            error_msg=error_msg,
+            lang=lang,
+            texts=texts,
+            finance_back_url=url_for("admin_root") if current_user.has_permission("admin") else url_for("index"),
         )
 
     @app.route("/admin/add_user", methods=["POST"])

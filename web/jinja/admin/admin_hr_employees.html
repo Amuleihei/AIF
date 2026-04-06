@@ -87,7 +87,7 @@
                     <input type="hidden" name="form_action" value="edit">
                     <input type="hidden" name="original_name" id="edit-original-name" value="">
                     <div class="form-grid">
-                        <input type="text" name="display_name" id="edit-name" placeholder="{{ texts.get('hr_name', '姓名') }}" readonly>
+                        <input type="text" name="name" id="edit-name" placeholder="{{ texts.get('hr_name', '姓名') }}" required>
                         <select name="team" id="edit-team-select">
                             <option value="">{{ texts.get('hr_select_team', '请选择班组') }}</option>
                             {% for team in data.team_choices %}

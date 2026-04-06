@@ -34,6 +34,33 @@
         <div class="msg-err">{{ error_msg }}</div>
         {% endif %}
 
+        {% if hr_ai_insight %}
+        <div class="form-card-static" style="border-left:4px solid #0f766e; background:linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);">
+            <div class="att-toolbar" style="justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <strong>{{ hr_ai_insight.get('title', texts.get('hr_ai_panel_title', 'AI人事判断')) }}</strong>
+                    <div class="muted" style="margin-top:4px;">{{ hr_ai_insight.get('generated_at', '') }} · {{ hr_ai_insight.get('trigger', '') }}</div>
+                </div>
+                <div class="muted">{{ hr_ai_insight.get('scope', texts.get('attendance_mgmt_link', '考勤管理') ~ ' / HR') }}</div>
+            </div>
+            <div style="margin-top:10px;">
+                <div class="muted" style="margin-bottom:4px;">{{ hr_ai_insight.get('summary_label', texts.get('hr_ai_summary_label', '人事摘要')) }}</div>
+                <div style="color:#0f172a; line-height:1.7;">{{ hr_ai_insight.get('summary', '') }}</div>
+            </div>
+            <div class="att-toolbar" style="margin-top:10px;">
+                <span class="muted">{{ texts.get('risk_alerts_title', 'Risk Alerts') }}: {{ hr_ai_insight.get('risks', [])[0] if hr_ai_insight.get('risks') else '-' }}</span>
+                <span class="muted">{{ texts.get('intelligence_processing_advice', '处理建议') }}: {{ hr_ai_insight.get('actions', [])[0] if hr_ai_insight.get('actions') else '-' }}</span>
+            </div>
+            {% if hr_role_support %}
+            <div style="margin-top:14px; padding-top:12px; border-top:1px dashed rgba(15,118,110,.22);">
+                <div class="muted" style="margin-bottom:4px;">{{ texts.get('hr_ai_factory_support_label', '围绕当前工厂提升重点，HR 应配合') }}</div>
+                <div style="color:#0f172a; line-height:1.7;">{{ hr_role_support.get('summary', '') }}</div>
+                <div class="muted" style="margin-top:8px;">{{ hr_role_support.get('action', '-') }}</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="form-card-static">
             <div class="att-toolbar">
                 <button type="button" class="btn btn-edit" onclick="openAttendanceViewModal()">{{ texts.get('hr_attendance_view_title', '当前考勤查看') }}</button>
@@ -132,6 +159,25 @@
                         <button type="button" class="btn btn-cancel" onclick="closePayrollViewModal()">{{ texts.get('close_btn', '取消') }}</button>
                     </div>
                 </form>
+                {% if data.can_payroll_finance %}
+                <form method="POST" action="{{ url_for('admin_hr_attendance') }}" style="margin-top:10px; padding:12px; border:1px solid #dbe3ef; border-radius:12px; background:#f8fafc;">
+                    <input type="hidden" name="form_action" value="payroll_payout">
+                    <div class="att-toolbar">
+                        <input type="hidden" name="payroll_asof" value="{{ data.payroll_asof or data.attendance_day }}">
+                        <input type="hidden" name="payroll_name" value="{{ data.payroll_name or '' }}">
+                        <select name="payroll_account" style="max-width:180px;">
+                            <option value="cash">{{ texts.get('finance_cash_balance', '现金余额') }}</option>
+                            <option value="bank">{{ texts.get('finance_bank_balance', '银行余额') }}</option>
+                        </select>
+                        <input type="text" name="payroll_batch_ref" value="PAYROLL-{{ data.payroll_asof or data.attendance_day }}-{{ data.payroll_name or 'ALL' }}" placeholder="{{ texts.get('finance_ref_no', '单号/参考号') }}" style="max-width:240px;">
+                    </div>
+                    <div class="att-toolbar">
+                        <input type="text" name="payroll_note" placeholder="{{ texts.get('hr_payroll_post_note', '例如：4月工资发放/第一批') }}" style="min-width:280px; flex:1;">
+                        <button type="submit" class="btn btn-add">{{ texts.get('hr_payroll_post_btn', '一键发薪入账') }}</button>
+                    </div>
+                    <div class="muted" style="margin-top:6px;">{{ texts.get('hr_payroll_post_hint', '会按当前工资试算结果逐人写入财务支出流水，并同步计入人工成本。') }}</div>
+                </form>
+                {% endif %}
                 <div class="table-scroll" style="margin-top:10px;">
                 <table class="tbl">
                     <thead>
@@ -222,23 +268,22 @@
                 {% endif %}
 
                 <div class="att-toolbar">
-                    <label class="muted">{{ texts.get('hr_select_mode', '选择模式') }}</label>
-                    <select id="select-mode" style="max-width:140px;">
-                        <option value="multi">{{ texts.get('hr_multi_select', '多选') }}</option>
-                        <option value="single">{{ texts.get('hr_single_select', '单选') }}</option>
-                    </select>
                     <label class="muted">{{ texts.get('hr_card_filter', '状态筛选') }}</label>
                     <select id="card-status-filter" style="max-width:160px;">
                         <option value="all">{{ texts.get('all_label', '全部') }}</option>
                         <option value="absent">{{ texts.get('hr_status_absent', '未出勤') }}</option>
                         <option value="present">{{ texts.get('hr_status_present', '出勤中') }}</option>
+                        <option value="lunch">{{ texts.get('lunch_break_label', '午餐休息') }}</option>
+                        <option value="overtime">{{ texts.get('overtime_working_label', '加班中') }}</option>
                         <option value="off">{{ texts.get('hr_status_off', '离岗') }}</option>
+                        <option value="rest">{{ texts.get('rest_label', '休息') }}</option>
                         <option value="sick">{{ texts.get('hr_status_sick', '病假') }}</option>
                         <option value="leave">{{ texts.get('hr_status_leave', '休假') }}</option>
                     </select>
                     <label class="muted">{{ texts.get('hr_attendance_date', '考勤日期') }}</label>
                     <input type="date" name="attendance_date" id="attendance-date" value="{{ data.attendance_day }}" style="max-width:170px;">
-                    <span class="muted" id="selected-count">{{ texts.get('selected_label', '已选') }} 0</span>
+                    <button type="button" class="btn btn-add" onclick="oneClickAttendance()">{{ texts.get('hr_one_click_attendance', '一键出勤') }}</button>
+                    <span class="muted">{{ texts.get('hr_card_click_hint', '点击员工卡片可直接操作') }}</span>
                 </div>
 
                 <div class="att-toolbar">
@@ -251,38 +296,48 @@
                     <input type="number" step="0.5" min="0" name="attendance_special_hours" id="attendance-special-hours" placeholder="{{ texts.get('hr_special_hours', '特殊工时（h）') }}" value="4" style="max-width:150px;">
                 </div>
 
-                <div class="att-toolbar">
-                    <button type="button" class="btn" style="background:#334155;color:#fff;" onclick="selectAllVisibleEmpCards()">{{ texts.get('select_all', '全选') }}</button>
-                    <button type="button" class="btn" style="background:#64748b;color:#fff;" onclick="clearSelectedEmpCards()">{{ texts.get('clear_selection', '清空选择') }}</button>
-                    <button type="button" class="btn btn-add" onclick="oneClickAttendance()">{{ texts.get('hr_one_click_attendance', '一键出勤') }}</button>
-                    <button type="button" class="btn btn-add" onclick="submitAttendanceBatch('present')">{{ texts.get('hr_mark_present', '出勤') }}</button>
-                    <button type="button" class="btn btn-edit" onclick="submitAttendanceBatch('overtime')">{{ texts.get('hr_mark_overtime', '加班 x小时') }}</button>
-                    <button type="button" class="btn" style="background:#d97706;color:#fff;" onclick="submitAttendanceBatch('special_off')">{{ texts.get('hr_mark_special_off', '下班(特殊工时)') }}</button>
-                    <span class="muted">{{ texts.get('hr_special_off_hint', '下班按钮仅用于半天/数小时工时计算，不作为打卡依据') }}</span>
+                {% for group in data.grouped_rows %}
+                <div class="group-card">
+                    <div class="group-title">{{ group.team_label or group.team_value or '未分组' }}（{{ group.rows|length }}）</div>
+                    <div class="emp-card-grid" id="emp-card-grid-{{ loop.index }}">
+                        {% for row in group.rows %}
+                        <div class="emp-card" data-name="{{ row.name }}" data-att-status="{{ row.today_attendance_status or 'absent' }}" data-emp-status="{{ row.status or '' }}" data-team="{{ group.team_value or '' }}" onclick="openAttendanceActionBubble(this, event)">
+                            <div class="n">{{ row.name }}</div>
+                            <div class="m">{{ row.team_label or row.team or '-' }} / {{ row.position_label or row.position or '-' }}</div>
+                            <div class="att-state {{ row.today_attendance_status or 'absent' }}">
+                                {{ row.today_attendance_status_text or texts.get('hr_status_absent', '未出勤') }}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
                 </div>
-
-                <div class="emp-card-grid" id="emp-card-grid">
-                    {% for row in data.rows %}
-                    {% if row.status != '离职' %}
-                    <div class="emp-card" data-name="{{ row.name }}" data-att-status="{{ row.today_attendance_status or 'absent' }}" data-emp-status="{{ row.status or '' }}" onclick="toggleEmpCard(this, event)">
-                        <div class="n">{{ row.name }}</div>
-                        <div class="m">{{ row.team_label or row.team or '-' }} / {{ row.position_label or row.position or '-' }}</div>
-                        <div class="att-state {{ row.today_attendance_status or 'absent' }}">
-                            {% if row.today_attendance_status == 'present' %}
-                            {{ texts.get('hr_status_present', '出勤中') }}
-                            {% elif row.today_attendance_status == 'off' %}
-                            {{ texts.get('hr_status_off', '离岗') }}
-                            {% elif row.today_attendance_status == 'sick' %}
-                            {{ texts.get('hr_status_sick', '病假') }}
-                            {% elif row.today_attendance_status == 'leave' %}
-                            {{ texts.get('hr_status_leave', '休假') }}
-                            {% else %}
-                            {{ texts.get('hr_status_absent', '未出勤') }}
-                            {% endif %}
+                {% endfor %}
+                <div id="attendance-action-backdrop" class="attendance-action-backdrop" style="display:none;"></div>
+                <div id="attendance-action-bubble" class="attendance-action-bubble" style="display:none;">
+                    <div class="attendance-action-arrow"></div>
+                    <div class="attendance-action-title" id="attendance-action-title"></div>
+                    <div class="attendance-action-grid">
+                        <button type="button" class="btn btn-add" onclick="submitAttendanceBubbleAction('present')">{{ texts.get('hr_action_checkin', '上班') }}</button>
+                        <button type="button" class="btn" style="background:#d97706;color:#fff;" onclick="submitAttendanceBubbleAction('special_off')">{{ texts.get('hr_action_checkout', '下班') }}</button>
+                        <button type="button" class="btn" style="background:#475569;color:#fff;" onclick="submitAttendanceBubbleAction('rest')">{{ texts.get('rest_label', '休息') }}</button>
+                        <button type="button" class="btn" style="background:#b45309;color:#fff;" onclick="submitAttendanceBubbleAction('leave')">{{ texts.get('hr_status_leave', '休假') }}</button>
+                        <button type="button" class="btn" style="background:#b91c1c;color:#fff;" onclick="submitAttendanceBubbleAction('sick')">{{ texts.get('hr_status_sick', '病假') }}</button>
+                        <button type="button" class="btn btn-edit" onclick="submitAttendanceBubbleAction('overtime')">{{ texts.get('hr_action_overtime', '加班') }}</button>
+                    </div>
+                </div>
+                <div id="attendance-input-sheet" class="attendance-input-sheet" style="display:none;">
+                    <div class="attendance-input-sheet-card">
+                        <div class="attendance-input-sheet-title" id="attendance-input-sheet-title"></div>
+                        <div class="attendance-input-sheet-subtitle" id="attendance-input-sheet-subtitle"></div>
+                        <div class="attendance-input-sheet-row">
+                            <input type="number" step="0.5" min="0" id="attendance-input-sheet-value" class="attendance-input-sheet-field">
+                            <span class="attendance-input-sheet-unit">{{ texts.get('hours_unit_short', '小时') }}</span>
+                        </div>
+                        <div class="attendance-input-sheet-actions">
+                            <button type="button" class="btn btn-cancel" onclick="closeAttendanceInputSheet()">{{ texts.get('close_btn', '取消') }}</button>
+                            <button type="button" class="btn btn-add" id="attendance-input-sheet-confirm" onclick="confirmAttendanceInputSheet()">{{ texts.get('confirm_btn', '确定') }}</button>
                         </div>
                     </div>
-                    {% endif %}
-                    {% endfor %}
                 </div>
                 <div style="margin-top:8px;">
                     <span class="muted">{{ texts.get('hr_attendance_hint', '工资试算将自动按小时与加班工时联动') }}</span>

@@ -191,10 +191,85 @@
             { id: 'stage2', label: 'B', options: ['18_24', '19_24'], defaultKey: '18_24' },
             { id: 'stage3', label: 'C', options: ['25_plus_430'], defaultKey: '25_plus_430' }
         ];
+        let AI_ASSISTANT_SUBMITTING = false;
+        const AI_ASSISTANT_SUBMIT_LABEL = `{{ texts.get('ai_assistant_send', '发送给AI') }}`;
+        const AI_ASSISTANT_BUSY_LABEL = `{{ texts.get('ai_assistant_submitting', 'AI分析中...') }}`;
+        const AI_ASSISTANT_EMPTY_LABEL = `{{ texts.get('ai_assistant_empty', '先输入你想问的问题。') }}`;
+        const AI_ASSISTANT_ANALYZING_LABEL = `{{ texts.get('ai_assistant_analyzing', '正在结合实时数据做分析...') }}`;
+        const AI_ASSISTANT_DONE_LABEL = `{{ texts.get('ai_assistant_done', '分析完成，可继续追问。') }}`;
+        const AI_ASSISTANT_FAILED_LABEL = `{{ texts.get('ai_assistant_failed', 'AI请求失败') }}`;
         let logEntryDraft = { driver_name: '', truck_number: '', details: [], rules: [] };
         let logDriverFetchTimer = null;
         let sawMachineDraft = [];
         let currentSawLogMachineNo = null;
+
+        function fillAiAssistantPrompt(text) {
+            const input = document.getElementById('ai-assistant-input');
+            if (!input) return;
+            input.value = String(text || '').trim();
+            input.focus();
+        }
+
+        function setAiAssistantStatus(text, isError = false) {
+            const node = document.getElementById('ai-assistant-status');
+            if (!node) return;
+            node.textContent = String(text || '');
+            node.style.color = isError ? '#b91c1c' : '#6b7280';
+        }
+
+        function setAiAssistantBusy(busy) {
+            AI_ASSISTANT_SUBMITTING = !!busy;
+            const btn = document.getElementById('ai-assistant-submit');
+            if (!btn) return;
+            btn.disabled = AI_ASSISTANT_SUBMITTING;
+            btn.style.opacity = AI_ASSISTANT_SUBMITTING ? '0.7' : '';
+            btn.textContent = AI_ASSISTANT_SUBMITTING ? AI_ASSISTANT_BUSY_LABEL : AI_ASSISTANT_SUBMIT_LABEL;
+        }
+
+        function renderAiAssistantAnswer(text) {
+            const box = document.getElementById('ai-assistant-answer');
+            if (!box) return;
+            const content = String(text || '').trim();
+            if (!content) {
+                box.style.display = 'none';
+                box.textContent = '';
+                return;
+            }
+            box.style.display = 'block';
+            box.textContent = content;
+        }
+
+        function submitAiAssistant() {
+            if (AI_ASSISTANT_SUBMITTING) return;
+            const input = document.getElementById('ai-assistant-input');
+            const question = input ? String(input.value || '').trim() : '';
+            if (!question) {
+                setAiAssistantStatus(AI_ASSISTANT_EMPTY_LABEL, true);
+                if (input) input.focus();
+                return;
+            }
+
+            setAiAssistantBusy(true);
+            setAiAssistantStatus(AI_ASSISTANT_ANALYZING_LABEL);
+            fetch('/api/ai-assistant?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question })
+            })
+            .then(async response => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.ok) {
+                    throw new Error((data && data.error) || 'AI 请求失败');
+                }
+                renderAiAssistantAnswer(data.answer || '');
+                setAiAssistantStatus(AI_ASSISTANT_DONE_LABEL);
+            })
+            .catch(err => {
+                renderAiAssistantAnswer('');
+                setAiAssistantStatus(err && err.message ? err.message : AI_ASSISTANT_FAILED_LABEL, true);
+            })
+            .finally(() => setAiAssistantBusy(false));
+        }
 
         function calcLogEntryMt(size, length, quantity) {
             const sizeVal = Number(size) || 0;
@@ -468,9 +543,9 @@
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>
-                    <input type="number" class="led-size" min="1" value="${sizeVal}" readonly style="height:30px; padding:4px 6px; font-size:12px; width:90px; background:#f8f9fa;">
+                    <input type="text" class="led-size" inputmode="numeric" pattern="[0-9]*" value="${sizeVal}" style="height:30px; padding:4px 6px; font-size:12px; width:90px;">
                 </td>
-                <td><input type="number" class="led-qty" min="1" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td><input type="text" class="led-qty" inputmode="numeric" pattern="[0-9]*" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
                 <td>
                     <select class="led-length" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:90px; font-size:12px;">
                         <option value="3"${Number(detail.length_ft || 3) === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
@@ -484,9 +559,30 @@
             const sizeInput = tr.querySelector('.led-size');
             const qtyInput = tr.querySelector('.led-qty');
             const lengthInput = tr.querySelector('.led-length');
-            [qtyInput, lengthInput].forEach(input => {
+            const sanitizeIntegerInput = (input) => {
+                if (!input) return;
+                const cleaned = String(input.value || '').replace(/[^\d]/g, '');
+                if (cleaned !== input.value) input.value = cleaned;
+            };
+            [sizeInput, qtyInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    sanitizeIntegerInput(input);
+                    renderLogEntryDetailTotal();
+                });
+                input.addEventListener('change', () => {
+                    sanitizeIntegerInput(input);
+                    renderLogEntryDetailTotal();
+                });
+            });
+            [lengthInput].forEach(input => {
                 input.addEventListener('input', renderLogEntryDetailTotal);
                 input.addEventListener('change', renderLogEntryDetailTotal);
+            });
+            sizeInput.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                qtyInput.focus();
+                qtyInput.select();
             });
             qtyInput.addEventListener('keydown', event => {
                 if (event.key !== 'Enter') return;
@@ -494,7 +590,7 @@
                 addLogEntryDetailRow({}, 'qty');
             });
             renderLogEntryDetailTotal();
-            const target = qtyInput;
+            const target = focusField === 'size' ? sizeInput : qtyInput;
             setTimeout(() => {
                 target.focus();
                 target.select();
@@ -2478,6 +2574,18 @@
             document.getElementById('create-shipment-modal').style.display = 'none';
         }
 
+        function openManualShipmentModal() {
+            const departureInput = document.getElementById('manual-shipment-departure-at');
+            if (departureInput && !departureInput.value) {
+                departureInput.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            }
+            document.getElementById('manual-shipment-modal').style.display = 'flex';
+        }
+
+        function closeManualShipmentModal() {
+            document.getElementById('manual-shipment-modal').style.display = 'none';
+        }
+
         function createShipment() {
             const payload = buildShipmentPayload();
             fetch('/api/shipping_orders?lang={{ lang }}', {
@@ -2494,6 +2602,35 @@
                 location.reload();
             })
             .catch(err => alert(err.message || '{{ texts.shipment_create_failed }}'));
+        }
+
+        function createManualShipment() {
+            const payload = {
+                customer: (document.getElementById('manual-shipment-customer').value || '').trim(),
+                destination: (document.getElementById('manual-shipment-destination').value || '').trim(),
+                departure_at: (document.getElementById('manual-shipment-departure-at').value || '').trim(),
+                vehicle_no: (document.getElementById('manual-shipment-vehicle-no').value || '').trim(),
+                driver_name: (document.getElementById('manual-shipment-driver-name').value || '').trim(),
+                tracking_no: (document.getElementById('manual-shipment-tracking-no').value || '').trim(),
+                eta_hours_to_yangon: parseInt(document.getElementById('manual-shipment-eta-hours').value || '36', 10),
+                total_pcs: parseInt(document.getElementById('manual-shipment-total-pcs').value || '0', 10),
+                total_volume: parseFloat(document.getElementById('manual-shipment-total-volume').value || '0'),
+                remark: (document.getElementById('manual-shipment-remark').value || '').trim()
+            };
+            fetch('/api/shipping_orders/manual?lang={{ lang }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json().then(data => ({ ok: r.ok, data })))
+            .then(({ok, data}) => {
+                if (!ok) throw new Error(data.error || '{{ texts.shipment_manual_failed }}');
+                closeManualShipmentModal();
+                alert(`{{ texts.shipment_create_success }}: ${data.shipment_no || ''}`);
+                storeScrollPosition();
+                location.reload();
+            })
+            .catch(err => alert(err.message || '{{ texts.shipment_manual_failed }}'));
         }
 
         function renderShippingBoardRows() {
@@ -2515,7 +2652,7 @@
                     <td>${row.vehicle_no || ''}</td>
                     <td>${row.driver_name || ''}</td>
                     <td>${row.eta_hours_to_yangon || 36}</td>
-                    <td>${row.total_pcs || 0} / ${row.product_count || 0}件</td>
+                    <td>${row.manual_entry ? `${row.total_pcs || 0}件 / ${Number(row.total_volume || 0).toFixed(4)} m³` : `${row.total_pcs || 0} / ${row.product_count || 0}件`}</td>
                     <td>${Number(row.total_volume || 0).toFixed(4)}</td>
                     <td><span class="shipment-status-badge ${shipmentStatusClass(row.status)}">${row.status || ''}</span></td>
                     <td>${(row.updated_at || row.created_at || '').replace('T', ' ').slice(0, 16)}</td>
@@ -2996,5 +3133,16 @@
                 const clean = url.pathname + (url.searchParams.toString() ? ('?' + url.searchParams.toString()) : '') + url.hash;
                 window.history.replaceState({}, '', clean);
             } catch (_) {}
+        })();
+
+        (function initAiAssistantHotkey(){
+            const input = document.getElementById('ai-assistant-input');
+            if (!input) return;
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+                    submitAiAssistant();
+                }
+            });
         })();
     </script>

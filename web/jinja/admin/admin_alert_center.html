@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>预警与效率中心</title>
+    <title>{{ texts.get('intelligence_effectiveness_center', 'Alert & Efficiency Center') }}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -45,11 +45,11 @@
 </head>
 <body>
     <div class="container">
-        <a href="{{ url_for('admin_root') }}" class="back-link">← 管理总览</a>
-        <a href="{{ url_for('admin_users') }}" class="link-inline">用户管理</a>
-        <a href="{{ url_for('admin_audit_logs') }}" class="link-inline">审计日志</a>
-        <a href="{{ url_for('admin_alert_settings') }}" class="link-inline">预警阈值</a>
-        <h1 style="margin:8px 0 14px;">预警与效率中心</h1>
+        <a href="{{ url_for('admin_root') }}" class="back-link">← {{ texts.get('admin_overview_title', 'Admin Overview') }}</a>
+        <a href="{{ url_for('admin_users') }}" class="link-inline">{{ texts.get('user_management', 'User Management') }}</a>
+        <a href="{{ url_for('admin_audit_logs') }}" class="link-inline">{{ texts.get('audit_logs', 'Audit Logs') }}</a>
+        <a href="{{ url_for('admin_alert_settings') }}" class="link-inline">{{ texts.get('alert_threshold', 'Alert Threshold') }}</a>
+        <h1 style="margin:8px 0 14px;">{{ texts.get('intelligence_effectiveness_center', 'Alert & Efficiency Center') }}</h1>
 
         {% if result_msg %}
         <div class="card" style="border-color:#bbf7d0; background:#f0fdf4;">{{ result_msg }}</div>
@@ -57,32 +57,81 @@
 
         <div class="card">
             <div class="row" style="justify-content:space-between;">
-                <div><strong>关键预警（仅原木与成品）</strong></div>
-                <div class="muted">通知静默至：{{ data.silence_until_text }}</div>
+                <div><strong>{{ texts.get('intelligence_key_alerts', 'Key Alerts (Logs & Finished Goods Only)') }}</strong></div>
+                <div class="muted">{{ texts.get('intelligence_silence_until', 'Notifications Muted Until') }}: {{ data.silence_until_text }}</div>
             </div>
             <div class="grid" style="margin-top:10px;">
-                <div class="metric"><div class="k">总预警</div><div class="v">{{ data.weekly.total }}</div></div>
-                <div class="metric"><div class="k">L3/L2/L1</div><div class="v">{{ data.weekly.by_level.L3 }}/{{ data.weekly.by_level.L2 }}/{{ data.weekly.by_level.L1 }}</div></div>
-                <div class="metric"><div class="k">关闭率</div><div class="v">{{ "%.1f"|format(data.weekly.resolve_rate) }}%</div></div>
-                <div class="metric"><div class="k">平均关闭时长</div><div class="v">{{ "%.2f"|format(data.weekly.avg_resolve_hours) }}h</div></div>
+                <div class="metric"><div class="k">{{ texts.get('intelligence_total_alerts', 'Total Alerts') }}</div><div class="v">{{ data.weekly.total }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('intelligence_alert_levels', 'L3/L2/L1') }}</div><div class="v">{{ data.weekly.by_level.L3 }}/{{ data.weekly.by_level.L2 }}/{{ data.weekly.by_level.L1 }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('intelligence_close_rate', 'Close Rate') }}</div><div class="v">{{ "%.1f"|format(data.weekly.resolve_rate) }}%</div></div>
+                <div class="metric"><div class="k">{{ texts.get('intelligence_avg_close_hours', 'Avg Close Time') }}</div><div class="v">{{ "%.2f"|format(data.weekly.avg_resolve_hours) }}h</div></div>
             </div>
         </div>
 
+        <div class="card" style="border-color:#99f6e4; background:linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);">
+            <div class="row" style="justify-content:space-between;">
+                <strong>{{ texts.get('intelligence_panel_title', 'AI Advice') }}</strong>
+                <div class="muted">{{ data.factory_intelligence.overview }}</div>
+            </div>
+            <div class="grid3" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_symptom_stage', 'Current Pressure Stage') }}</div>
+                    <div class="v" style="font-size:18px;">{{ data.factory_intelligence.pressure_stage.name if data.factory_intelligence.pressure_stage else data.factory_intelligence.bottleneck.name }}</div>
+                    <div class="muted">{{ data.factory_intelligence.pressure_stage.reason if data.factory_intelligence.pressure_stage else data.factory_intelligence.bottleneck.reason }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_root_cause', 'Priority Improvement Stage') }}</div>
+                    <div class="v" style="font-size:18px;">{{ data.factory_intelligence.priority_stage.name if data.factory_intelligence.priority_stage else data.factory_intelligence.root_bottleneck.name }}</div>
+                    <div class="muted">{{ data.factory_intelligence.priority_stage.reason if data.factory_intelligence.priority_stage else data.factory_intelligence.root_bottleneck.reason }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_processing_advice', 'Action Advice') }}</div>
+                    <div class="muted">{{ data.factory_intelligence.recommendations[0] if data.factory_intelligence.recommendations else '-' }}</div>
+                    <div class="muted" style="margin-top:6px;">{{ data.factory_intelligence.recommendations[1] if data.factory_intelligence.recommendations|length > 1 else '' }}</div>
+                    <div class="muted" style="margin-top:6px;">{{ data.factory_intelligence.recommendations[2] if data.factory_intelligence.recommendations|length > 2 else '' }}</div>
+                </div>
+            </div>
+        </div>
+
+        {% if data.ai_deep_monitor and data.ai_deep_monitor.summary %}
+        <div class="card" style="border-color:#cbd5e1; background:linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);">
+            <div class="row" style="justify-content:space-between;">
+                <strong>{{ texts.get('intelligence_panel_title', 'AI建议') }}</strong>
+                <div class="muted">{{ data.ai_deep_monitor.generated_at }} · {{ data.ai_deep_monitor.trigger }}</div>
+            </div>
+            <div style="margin-top:10px; color:#0f172a; line-height:1.7;">{{ data.ai_deep_monitor.summary }}</div>
+            <div class="grid3" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('ai_quick_today_focus', 'Today Focus') }}</div>
+                    <div class="muted">{{ data.ai_deep_monitor.focus[0] if data.ai_deep_monitor.focus else '-' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</div>
+                    <div class="muted">{{ data.ai_deep_monitor.risks[0] if data.ai_deep_monitor.risks else '-' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_processing_advice', 'Action Advice') }}</div>
+                    <div class="muted">{{ data.ai_deep_monitor.actions[0] if data.ai_deep_monitor.actions else '-' }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="layout">
             <div class="card">
-                <strong>流程效率雷达图（当前/日/周/月）</strong>
-                <div class="muted" style="margin-top:4px;">越接近外圈代表效率越好，满分100</div>
+                <strong>{{ texts.get('efficiency_radar_title', 'Process Efficiency Radar (Current/Day/Week/Month)') }}</strong>
+                <div class="muted" style="margin-top:4px;">{{ texts.get('efficiency_radar_hint', 'Closer to the edge means better efficiency. Full score is 100.') }}</div>
                 <canvas id="eff-radar" width="560" height="360"></canvas>
             </div>
             <div class="card">
-                <strong>效率对比</strong>
+                <strong>{{ texts.get('efficiency_compare_title', 'Efficiency Comparison') }}</strong>
                 <div class="grid3" style="margin-top:10px;">
-                    <div class="metric"><div class="k">当日均分</div><div class="v">{{ data.efficiency.day.total_score }}</div><div class="muted">前一日 {{ data.efficiency.day_prev.total_score }}</div></div>
-                    <div class="metric"><div class="k">当周均分</div><div class="v">{{ data.efficiency.week.total_score }}</div><div class="muted">前一周 {{ data.efficiency.week_prev.total_score }}</div></div>
-                    <div class="metric"><div class="k">当月均分</div><div class="v">{{ data.efficiency.month.total_score }}</div><div class="muted">前一月 {{ data.efficiency.month_prev.total_score }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('efficiency_day_avg', 'Daily Avg') }}</div><div class="v">{{ data.efficiency.day.total_score }}</div><div class="muted">{{ texts.get('compare_prev_label', 'Prev') }} {{ data.efficiency.day_prev.total_score }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('efficiency_week_avg', 'Weekly Avg') }}</div><div class="v">{{ data.efficiency.week.total_score }}</div><div class="muted">{{ texts.get('compare_prev_label', 'Prev') }} {{ data.efficiency.week_prev.total_score }}</div></div>
+                    <div class="metric"><div class="k">{{ texts.get('efficiency_month_avg', 'Monthly Avg') }}</div><div class="v">{{ data.efficiency.month.total_score }}</div><div class="muted">{{ texts.get('compare_prev_label', 'Prev') }} {{ data.efficiency.month_prev.total_score }}</div></div>
                 </div>
                 <div class="card" style="margin-top:10px; background:#fff;">
-                    <div class="muted">五维指标：原木保障 / 前段均衡 / 中段流速 / 积压健康 / 成品健康</div>
+                    <div class="muted">{{ texts.get('efficiency_five_dim_hint', 'Five dimensions: Raw Material Security / Front Balance / Middle Flow / Backlog Health / Finished-Goods Health') }}</div>
                 </div>
                 <form method="POST" action="{{ url_for('admin_alert_center') }}" style="margin-top:10px;">
                     <input type="hidden" name="form_type" value="engine_cfg">
@@ -108,22 +157,22 @@
                             <div class="muted">同类预警在该时间内不重复推送 TG，防止刷屏。</div>
                         </div>
                         <div class="cfg-item">
-                            <div class="title">启用瓶颈模式</div>
+                            <div class="title">启用提升优先模式</div>
                             <select name="enable_bottleneck_mode">
                                 <option value="1" {% if data.engine_cfg.enable_bottleneck_mode == 1 %}selected{% endif %}>开启</option>
                                 <option value="0" {% if data.engine_cfg.enable_bottleneck_mode != 1 %}selected{% endif %}>关闭</option>
                             </select>
-                            <div class="muted">二次分拣积压高时放宽中段/积压评分，避免雷达图“塌死”。</div>
+                            <div class="muted">二次分拣积压高时放宽中段/积压评分，避免雷达图“塌死”，保留提升观察空间。</div>
                         </div>
                         <div class="cfg-item">
-                            <div class="title">瓶颈触发阈值(窑完成托)</div>
+                            <div class="title">提升模式触发阈值(窑完成托)</div>
                             <input type="number" min="1" name="bottleneck_kiln_done_threshold" value="{{ data.engine_cfg.bottleneck_kiln_done_threshold }}" required>
-                            <div class="muted">窑完成库存达到该值时进入瓶颈模式。</div>
+                            <div class="muted">窑完成库存达到该值时进入提升优先模式。</div>
                         </div>
                         <div class="cfg-item">
-                            <div class="title">瓶颈放宽权重(%)</div>
+                            <div class="title">提升模式放宽权重(%)</div>
                             <input type="number" min="0" max="100" name="bottleneck_relax_weight_pct" value="{{ data.engine_cfg.bottleneck_relax_weight_pct }}" required>
-                            <div class="muted">越大则瓶颈期分数越平缓（建议 20-45）。</div>
+                            <div class="muted">越大则提升期分数越平缓（建议 20-45）。</div>
                         </div>
                         <div class="cfg-item">
                             <div class="title">连续2天改善加分</div>

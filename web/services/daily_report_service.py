@@ -530,6 +530,8 @@ def build_daily_report(day_text: str | None = None, lang: str = "zh") -> dict:
         "show_yield_loss": bool(yield_loss_enabled),
         "kiln_status": kiln_status,
         "kiln_status_detail": kiln_status_detail,
+        "factory_intelligence": stock.get("factory_intelligence", {}) if isinstance(stock.get("factory_intelligence"), dict) else {},
+        "ai_deep_monitor": stock.get("ai_deep_monitor", {}) if isinstance(stock.get("ai_deep_monitor"), dict) else {},
         "breakdown": {
             "log_entries": [
                 {

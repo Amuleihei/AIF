@@ -1,4 +1,4 @@
-# 1) HTTP 统一入口：无论 IP 还是域名，一律跳到域名 HTTPS
+# 1) 局域网 / 本机 HTTP 入口：不跳域名，直接反代到本地 Web
 server {
     listen 80 default_server;
     server_name _;
@@ -9,11 +9,47 @@ server {
         try_files $uri =404;
     }
 
+    location /static/ {
+        alias /home/amuleihei/AIF/web/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+
+    access_log /var/log/nginx/aif-web.access.log;
+    error_log /var/log/nginx/aif-web.error.log;
+}
+
+# 2) 公网域名 HTTP：只把正式域名跳到 HTTPS
+server {
+    listen 80;
+    server_name aifbot.pro;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
     return 301 https://aifbot.pro$request_uri;
 }
 
-# 2) HTTPS 非域名入口（IP/其他 Host）：统一跳转到域名
-# 注意：若浏览器访问的是“未包含在证书SAN里的IP”，TLS 握手前仍可能报证书名不匹配，这是 HTTPS 机制决定的。
+# 3) 局域网 / 本机 HTTPS 入口：不跳域名，允许本地直连
 server {
     listen 443 ssl default_server;
     server_name _;
@@ -23,10 +59,39 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    return 301 https://aifbot.pro$request_uri;
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type "text/plain";
+        try_files $uri =404;
+    }
+
+    location /static/ {
+        alias /home/amuleihei/AIF/web/static/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+
+    access_log /var/log/nginx/aif-web.access.log;
+    error_log /var/log/nginx/aif-web.error.log;
 }
 
-# 3) 域名主站
+# 4) 域名主站 HTTPS
 server {
     listen 443 ssl;
     server_name aifbot.pro;

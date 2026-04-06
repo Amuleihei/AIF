@@ -926,6 +926,27 @@ def _upsert_attendance_record(
     rec["source"] = "admin_hr_cards"
 
 
+def _remove_attendance_record(d: dict[str, Any], name: str, day: str) -> bool:
+    rows = d.get("attendance_records", [])
+    if not isinstance(rows, list):
+        return False
+    removed = False
+    kept: list[Any] = []
+    for rec in rows:
+        if not isinstance(rec, dict):
+            kept.append(rec)
+            continue
+        rec_name = str(rec.get("name", "") or "").strip()
+        rec_day = str(rec.get("date", "") or "").strip()
+        if rec_name == name and rec_day == day:
+            removed = True
+            continue
+        kept.append(rec)
+    if removed:
+        d["attendance_records"] = kept
+    return removed
+
+
 def apply_hr_attendance_batch_from_admin(
     names: list[str] | None,
     action: str,
@@ -958,7 +979,7 @@ def apply_hr_attendance_batch_from_admin(
         default_ot_m = 1.5
 
     act = str(action or "").strip().lower()
-    if act not in ("present", "overtime", "special_off"):
+    if act not in ("present", "overtime", "special_off", "leave", "sick", "rest"):
         return False, "❌ 未知考勤动作", get_hr_employees_payload()
 
     ot_h = max(0.0, _to_float(str(overtime_hours or "").strip() or 0, 0.0))
@@ -988,6 +1009,12 @@ def apply_hr_attendance_batch_from_admin(
             e["status"] = "在岗"
         elif act == "special_off":
             e["status"] = "离岗"
+        elif act == "leave":
+            e["status"] = "休假"
+        elif act == "sick":
+            e["status"] = "病假"
+        elif act == "rest":
+            e["status"] = "休息"
 
         if act == "present":
             _upsert_attendance_record(
@@ -1014,6 +1041,8 @@ def apply_hr_attendance_batch_from_admin(
                 day=final_day,
                 regular_hours=max(0.0, sp_h),
             )
+        if act in ("leave", "sick", "rest"):
+            _remove_attendance_record(d, name, final_day)
         updated += 1
 
     if updated <= 0:
@@ -1024,6 +1053,9 @@ def apply_hr_attendance_batch_from_admin(
         "present": "出勤",
         "overtime": f"加班 {ot_h:.2f}h x{ot_m:.2f}",
         "special_off": f"下班(特殊工时) {sp_h:.2f}h",
+        "leave": "休假/休息",
+        "sick": "病假",
+        "rest": "休息",
     }.get(act, act)
     msg = f"✅ 已更新考勤: {action_text}，人数{updated}，日期{final_day}"
     if skipped > 0:
@@ -1359,7 +1391,7 @@ def get_hr_employees_payload() -> dict[str, Any]:
     special_task_rows: list[dict[str, Any]] = []
     raw_attendance = d.get("attendance_records", [])
     today = _today()
-    attended_today: set[str] = set()
+    today_attendance_map: dict[str, dict[str, Any]] = {}
     if isinstance(raw_attendance, list):
         # 出勤判断必须覆盖全部记录，避免记录顺序被人工调整后漏判“今日已出勤”。
         for rec in raw_attendance:
@@ -1371,8 +1403,17 @@ def get_hr_employees_payload() -> dict[str, Any]:
             oh = max(0.0, _to_float(rec.get("overtime_hours"), 0.0))
             rec_day = str(rec.get("date", "") or "")
             rec_name = str(rec.get("name", "") or "")
-            if rec_day == today and rec_name and (rh > 0 or oh > 0):
-                attended_today.add(rec_name)
+            if rec_day == today and rec_name:
+                prev = today_attendance_map.get(rec_name, {})
+                prev_regular = max(0.0, _to_float(prev.get("regular_hours"), 0.0)) if isinstance(prev, dict) else 0.0
+                prev_ot = max(0.0, _to_float(prev.get("overtime_hours"), 0.0)) if isinstance(prev, dict) else 0.0
+                today_attendance_map[rec_name] = {
+                    "name": rec_name,
+                    "date": rec_day,
+                    "regular_hours": round(max(prev_regular, rh), 2),
+                    "overtime_hours": round(max(prev_ot, oh), 2),
+                    "overtime_multiplier": round(_to_float(rec.get("overtime_multiplier"), 1.5), 2),
+                }
             attendance_rows.append(
                 {
                     "name": rec_name,
@@ -1410,24 +1451,15 @@ def get_hr_employees_payload() -> dict[str, Any]:
                 }
             )
     special_task_rows.sort(key=lambda x: (str(x.get("date", "")), str(x.get("name", ""))), reverse=True)
+    now_dt = datetime.now()
     for row in rows:
         if not isinstance(row, dict):
             continue
         raw_status = str(row.get("status", "") or "")
         name = str(row.get("name", "") or "")
-        if raw_status == "离职":
-            att_code = "left"
-        elif raw_status == "离岗":
-            att_code = "off"
-        elif raw_status == "病假":
-            att_code = "sick"
-        elif raw_status == "休假":
-            att_code = "leave"
-        elif name and name in attended_today:
-            att_code = "present"
-        else:
-            att_code = "absent"
+        att_code, att_text = _derive_today_attendance_state(raw_status, today_attendance_map.get(name), now_dt)
         row["today_attendance_status"] = att_code
+        row["today_attendance_status_text"] = att_text
     absent_today_names = [
         str(r.get("name", "") or "")
         for r in rows
@@ -1522,6 +1554,46 @@ def get_hr_payroll_preview(asof: str = "", name: str = "") -> dict[str, Any]:
     }
 
 
+def _derive_today_attendance_state(
+    employee_status: str,
+    attendance_record: dict[str, Any] | None,
+    now_dt: datetime,
+) -> tuple[str, str]:
+    raw_status = str(employee_status or "").strip()
+    if raw_status == "离职":
+        return "left", "离职"
+    if raw_status == "病假":
+        return "sick", "病假"
+    if raw_status == "休假":
+        return "leave", "休假"
+    if raw_status == "休息":
+        return "rest", "休息"
+
+    rec = attendance_record if isinstance(attendance_record, dict) else None
+    regular_hours = max(0.0, _to_float((rec or {}).get("regular_hours"), 0.0))
+    overtime_hours = max(0.0, _to_float((rec or {}).get("overtime_hours"), 0.0))
+    attended = (regular_hours > 0.0) or (overtime_hours > 0.0)
+    if not attended:
+        if raw_status == "离岗":
+            return "off", "已下班"
+        return "absent", "未出勤"
+
+    hour_min = now_dt.hour * 60 + now_dt.minute
+    if raw_status == "离岗":
+        return "off", "已下班" if hour_min >= 16 * 60 else "离岗"
+    if hour_min >= 16 * 60:
+        if overtime_hours > 0.0:
+            return "overtime", "加班中"
+        if regular_hours >= 8.0:
+            return "off", "已下班"
+        return "present", "出勤中"
+    if 11 * 60 <= hour_min < 12 * 60:
+        return "lunch", "午餐休息"
+    if hour_min >= 7 * 60:
+        return "present", "出勤中"
+    return "present", "已出勤"
+
+
 def add_hr_employee_from_admin(
     name: str,
     team: str,
@@ -1580,6 +1652,7 @@ def add_hr_employee_from_admin(
 
 def update_hr_employee_from_admin(
     original_name: str,
+    name: str,
     team: str,
     position: str,
     salary_type: str,
@@ -1600,6 +1673,12 @@ def update_hr_employee_from_admin(
     if not isinstance(e, dict):
         return False, f"❌ 未找到员工: {emp_name}", get_hr_employees_payload()
 
+    final_name = str(name or "").strip() or emp_name
+    if not final_name:
+        return False, "❌ 姓名不能为空", get_hr_employees_payload()
+    if final_name != emp_name and final_name in emps:
+        return False, f"❌ 员工姓名已存在: {final_name}", get_hr_employees_payload()
+
     final_team = str(team or "").strip() or str(e.get("team", "") or "未分组")
     final_position = str(position or "").strip() or str(e.get("position", "") or "未设置")
     final_salary_type = str(salary_type or "").strip() or str(e.get("salary_type", "") or "月薪")
@@ -1613,7 +1692,7 @@ def update_hr_employee_from_admin(
         final_join_date = str(e.get("join_date", "") or "")
 
     final_status = str(status or "").strip() or str(e.get("status", "在岗") or "在岗")
-    if final_status not in ("在岗", "离岗", "离职", "病假", "休假"):
+    if final_status not in ("在岗", "离岗", "离职", "病假", "休假", "休息"):
         final_status = str(e.get("status", "在岗") or "在岗")
 
     final_cycle = _default_cycle(final_salary_type)
@@ -1630,14 +1709,19 @@ def update_hr_employee_from_admin(
     e["join_date"] = final_join_date
     e["status"] = final_status
     e["payout_cycle"] = final_cycle
+    e["name"] = final_name
     if final_status == "离职":
         e["left_date"] = str(e.get("left_date", "") or _today())
     else:
         e["left_date"] = ""
         e["left_reason"] = ""
 
+    if final_name != emp_name:
+        emps[final_name] = e
+        del emps[emp_name]
+
     save(d)
-    return True, f"✅ 已更新员工: {emp_name}", get_hr_employees_payload()
+    return True, f"✅ 已更新员工: {final_name}", get_hr_employees_payload()
 
 
 def update_hr_employee_status_from_admin(
@@ -1658,7 +1742,7 @@ def update_hr_employee_status_from_admin(
         return False, f"❌ 未找到员工: {emp_name}", get_hr_employees_payload()
 
     final_status = str(status or "").strip()
-    if final_status not in ("在岗", "离岗", "离职", "病假", "休假"):
+    if final_status not in ("在岗", "离岗", "离职", "病假", "休假", "休息"):
         return False, "❌ 状态无效", get_hr_employees_payload()
 
     e["status"] = final_status

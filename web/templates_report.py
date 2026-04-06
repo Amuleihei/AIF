@@ -59,6 +59,32 @@ DAILY_REPORT_TEMPLATE = """
         <p class="muted">{{ texts.report_range }}: {{ report.range.start }} ~ {{ report.range.end }}</p>
         <p class="muted">{{ report.meta.note }}</p>
 
+        {% if report.ai_deep_monitor and report.ai_deep_monitor.summary %}
+        <h3>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.ai_deep_monitor.summary }}</td></tr>
+                <tr><th>{{ texts.get('ai_quick_today_focus', 'Today Focus') }}</th><td>{{ report.ai_deep_monitor.focus[0] if report.ai_deep_monitor.focus else '-' }}</td></tr>
+                <tr><th>{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</th><td>{{ report.ai_deep_monitor.risks[0] if report.ai_deep_monitor.risks else '-' }}</td></tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.factory_intelligence %}
+        <h3>{{ texts.get('report_intelligence_title', 'Intelligence View') }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_root_cause_label', 'Priority Improvement Stage') }}</th><td>{{ report.factory_intelligence.priority_stage.name if report.factory_intelligence.priority_stage else report.factory_intelligence.root_bottleneck.name }}</td></tr>
+                <tr><th>{{ texts.get('report_root_reason_label', 'Improvement Basis') }}</th><td>{{ report.factory_intelligence.priority_stage.reason if report.factory_intelligence.priority_stage else report.factory_intelligence.root_bottleneck.reason }}</td></tr>
+                <tr><th>{{ texts.get('report_symptom_stage_label', 'Current Pressure Stage') }}</th><td>{{ report.factory_intelligence.pressure_stage.name if report.factory_intelligence.pressure_stage else report.factory_intelligence.bottleneck.name }}</td></tr>
+                <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.factory_intelligence.brief }}</td></tr>
+                {% if report.factory_intelligence.weekly_progress %}
+                <tr><th>{{ texts.get('weekly_progress_title', 'Weekly Improvement') }}</th><td>{{ report.factory_intelligence.weekly_progress.summary }}</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+        {% endif %}
+
         <h3>{{ texts.report_summary }}</h3>
         <table>
             <tbody>
@@ -78,7 +104,7 @@ DAILY_REPORT_TEMPLATE = """
         </table>
 
         {% if report.show_yield_loss %}
-        <h3>环节产出比 / 损耗率</h3>
+        <h3>{{ texts.get('report_yield_loss_title', 'Stage Output Ratio / Loss Rate') }}</h3>
         <table>
             <tbody>
                 {% for k in report.display_order.yield_loss %}
@@ -155,6 +181,9 @@ BOSS_DAILY_REPORT_TEMPLATE = """
         .kv-table td { text-align: left; background: #fff; }
         .kv-table tbody tr:nth-child(odd) th, .kv-table tbody tr:nth-child(odd) td { background: #ffffff; }
         .kv-table tbody tr:nth-child(even) th, .kv-table tbody tr:nth-child(even) td { background: #f3f6fb; }
+        .kv-table.ai-tight { table-layout: fixed; }
+        .kv-table.ai-tight th { width: 6.8em; white-space: nowrap; }
+        .kv-table.ai-tight td { width: auto; white-space: normal; word-break: break-word; line-height: 1.55; }
 
         .kiln-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
         .kiln { border: 1px solid #e3e9f3; border-radius: 10px; padding: 7px 8px; background: #fbfdff; }
@@ -212,6 +241,33 @@ BOSS_DAILY_REPORT_TEMPLATE = """
             <p class="muted">{{ report.meta.note }}</p>
         </div>
 
+        {% if report.ai_deep_monitor and report.ai_deep_monitor.summary %}
+        <div class="panel">
+            <h3>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h3>
+            <table class="kv-table ai-tight">
+                <tbody>
+                    <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.ai_deep_monitor.summary }}</td></tr>
+                    <tr><th>{{ texts.get('ai_quick_today_focus', 'Today Focus') }}</th><td>{{ report.ai_deep_monitor.focus[0] if report.ai_deep_monitor.focus else '-' }}</td></tr>
+                    <tr><th>{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</th><td>{{ report.ai_deep_monitor.risks[0] if report.ai_deep_monitor.risks else '-' }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if report.factory_intelligence %}
+        <div class="panel">
+            <h3>{{ texts.get('report_intelligence_title', 'Intelligence View') }}</h3>
+            <table class="kv-table ai-tight">
+                <tbody>
+                    <tr><th>{{ texts.get('report_root_cause_label', 'Priority Improvement Stage') }}</th><td>{{ report.factory_intelligence.priority_stage.name if report.factory_intelligence.priority_stage else report.factory_intelligence.root_bottleneck.name }}</td></tr>
+                    <tr><th>{{ texts.get('report_root_reason_label', 'Improvement Basis') }}</th><td>{{ report.factory_intelligence.priority_stage.reason if report.factory_intelligence.priority_stage else report.factory_intelligence.root_bottleneck.reason }}</td></tr>
+                    <tr><th>{{ texts.get('report_symptom_stage_label', 'Current Pressure Stage') }}</th><td>{{ report.factory_intelligence.pressure_stage.name if report.factory_intelligence.pressure_stage else report.factory_intelligence.bottleneck.name }}</td></tr>
+                    <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.factory_intelligence.brief }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <div class="panel">
             <h3>{{ texts.report_summary }}</h3>
             <table class="kv-table">
@@ -242,7 +298,7 @@ BOSS_DAILY_REPORT_TEMPLATE = """
 
         {% if report.show_yield_loss %}
         <div class="panel">
-            <h3>环节产出比 / 损耗率</h3>
+            <h3>{{ texts.get('report_yield_loss_title', 'Stage Output Ratio / Loss Rate') }}</h3>
             <table class="kv-table">
                 <tbody>
                     {% for k in report.display_order.yield_loss %}

@@ -7,6 +7,7 @@ from urllib import request as urllib_request
 
 from tg_bot.config import get_bot_token
 from web.i18n import LANGUAGES
+from web.data_store import get_flow_data, get_kilns_data, get_log_stock_total, get_product_stats, get_shipping_data
 from web.models import (
     Session,
     TgSetting,
@@ -19,6 +20,7 @@ from web.models import (
     FlowSelectedTray,
     FlowSelectedTrayDetail,
 )
+from web.services.factory_intelligence_service import build_factory_intelligence
 
 
 ALERT_EVENTS_KEY = "alert_engine_events_v1"
@@ -243,6 +245,100 @@ def _pack_i18n_text(key: str, default: str = "", **params) -> dict:
         "zh": _fmt_t("zh", key, default=default, **params),
         "en": _fmt_t("en", key, default=default, **params),
         "my": _fmt_t("my", key, default=default, **params),
+    }
+
+
+def _build_stock_snapshot_for_intelligence(lang: str) -> dict:
+    lc = _norm_lang(lang)
+    log_stock = float(get_log_stock_total())
+    product_count, product_m3 = get_product_stats()
+    flow = get_flow_data()
+    shipping = get_shipping_data()
+    shipping_summary = {'去仰光途中': 0, '仰光仓已到': 0, '已从仰光出港': 0, '异常': 0}
+    for item in shipping.get('shipments', []) if isinstance(shipping.get('shipments'), list) else []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get('status', '待发货') or '待发货')
+        if status == '待发车':
+            shipping_summary['去仰光途中'] = shipping_summary.get('去仰光途中', 0) + 1
+        elif status in shipping_summary:
+            shipping_summary[status] = shipping_summary.get(status, 0) + 1
+
+    kiln_status = {}
+    kilns = get_kilns_data()
+    now_ts = int(time.time())
+    for kiln_id in ['A', 'B', 'C', 'D']:
+        kiln_data = kilns.get(kiln_id, {}) if isinstance(kilns, dict) else {}
+        status = str(kiln_data.get('status', 'empty') or 'empty')
+        if status == 'ready_unload':
+            status = 'ready'
+        status_display = {
+            'empty': LANGUAGES[lc]['empty'],
+            'loading': LANGUAGES[lc]['loading'],
+            'drying': LANGUAGES[lc]['drying'],
+            'unloading': LANGUAGES[lc]['unloading'],
+            'ready': LANGUAGES[lc]['ready'],
+            'completed': LANGUAGES[lc]['completed'],
+        }.get(status, status)
+        trays_list = kiln_data.get('trays', [])
+        trays_in_kiln = sum(int(tray.get('count', 0) or 0) for tray in trays_list) if isinstance(trays_list, list) else 0
+        stored_total_trays = int(kiln_data.get('unloading_total_trays', 0) or 0)
+        unloaded_trays = int(kiln_data.get('unloaded_count', 0) or 0)
+        total_trays = stored_total_trays if status in {'ready', 'unloading', 'completed'} and stored_total_trays > 0 else trays_in_kiln
+        remaining_trays = max(0, total_trays - unloaded_trays)
+        progress = ""
+        elapsed_hours = 0
+        remaining_hours = 0
+        if status == 'drying' and (kiln_data.get('dry_start') or kiln_data.get('start')):
+            base = kiln_data.get('dry_start') or kiln_data.get('start')
+            try:
+                if isinstance(base, str):
+                    start_ts = int(datetime.fromisoformat(base.replace('Z', '+00:00')).timestamp())
+                else:
+                    start_ts = int(base)
+            except Exception:
+                start_ts = now_ts
+            elapsed = max(0, now_ts - start_ts)
+            remaining = max(0, 120 * 3600 - elapsed)
+            elapsed_hours = elapsed // 3600
+            remaining_hours = remaining // 3600
+            progress = LANGUAGES[lc]['drying_progress'].format(elapsed=elapsed_hours, remaining=remaining_hours)
+        elif total_trays > 0:
+            progress = f"{LANGUAGES[lc]['total_trays']}{total_trays} {LANGUAGES[lc]['remaining_trays']}{remaining_trays}{LANGUAGES[lc]['trays']}"
+
+        changed_raw = kiln_data.get('status_changed_at')
+        changed_ts = int(changed_raw) if isinstance(changed_raw, (int, float)) else 0
+        if changed_ts <= 0 and isinstance(changed_raw, str) and changed_raw.strip():
+            try:
+                changed_ts = int(datetime.fromisoformat(changed_raw.replace('Z', '+00:00')).timestamp())
+            except Exception:
+                changed_ts = 0
+        if changed_ts <= 0:
+            changed_ts = now_ts
+        status_duration_hours = max(0.0, (now_ts - changed_ts) / 3600.0)
+        kiln_status[kiln_id] = {
+            'status': status,
+            'status_display': status_display,
+            'progress': progress,
+            'elapsed_hours': elapsed_hours,
+            'remaining_hours': remaining_hours,
+            'total_trays': total_trays,
+            'remaining_trays': remaining_trays,
+            'in_kiln_trays': trays_in_kiln,
+            'remaining_kiln_trays': remaining_trays,
+            'status_duration_hours': round(status_duration_hours, 2),
+        }
+
+    return {
+        "log_stock": log_stock,
+        "saw_stock": flow.get("saw_tray_pool", 0),
+        "dip_stock": flow.get("dip_tray_pool", 0),
+        "sorting_stock": flow.get("selected_tray_pool", 0),
+        "kiln_done_stock": flow.get("kiln_done_tray_pool", 0),
+        "product_count": product_count,
+        "product_m3": product_m3,
+        "shipping_summary": shipping_summary,
+        "kiln_status": kiln_status,
     }
 
 
@@ -1497,17 +1593,26 @@ def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh") -> dict:
         weekly = _weekly_stats(events)
         efficiency = _efficiency_summary(_load_json(session, ALERT_HISTORY_KEY, []), cfg=cfg, lang=lc)
         throughput = _build_stage_throughput_payload(lang=lc, cfg=cfg)
+        intelligence = build_factory_intelligence(_build_stock_snapshot_for_intelligence(lc), efficiency, throughput, lang=lc)
         versions = sorted(versions, key=lambda x: _to_int(x.get("ts"), 0), reverse=True)[:30]
         for v in versions:
             v["ts_text"] = _format_ts(_to_int(v.get("ts"), 0))
 
         silence_until = _to_int(state.get("silence_until_ts"), 0)
+        try:
+            from web.services.ai_monitor_service import get_cached_deep_monitor
+            ai_deep_monitor = get_cached_deep_monitor(lc)
+        except Exception:
+            ai_deep_monitor = {}
+
         return {
             "active": active,
             "recent": recent,
             "weekly": weekly,
             "efficiency": efficiency,
             "throughput": throughput,
+            "factory_intelligence": intelligence,
+            "ai_deep_monitor": ai_deep_monitor,
             "versions": versions,
             "engine_cfg": cfg,
             "silence_until_ts": silence_until,

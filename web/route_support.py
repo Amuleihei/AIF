@@ -509,6 +509,8 @@ def _summarize_shipping_orders():
         products = item.get("products", []) if isinstance(item.get("products"), list) else []
         total_pcs = sum(_to_int(p.get("pcs"), 0) for p in products if isinstance(p, dict))
         total_volume = sum(_to_float(p.get("volume"), 0.0) for p in products if isinstance(p, dict))
+        product_line_count = sum(1 for p in products if isinstance(p, dict) and str(p.get("product_id", "") or "").strip())
+        manual_entry = product_line_count == 0 and (total_pcs > 0 or total_volume > 0)
         rows.append(
             {
                 "shipment_no": str(item.get("shipment_no", "") or ""),
@@ -523,9 +525,10 @@ def _summarize_shipping_orders():
                 "yangon_departed_at": str(item.get("yangon_departed_at", "") or ""),
                 "china_port_arrived_at": str(item.get("china_port_arrived_at", "") or ""),
                 "status": status,
-                "product_count": len(products),
+                "product_count": product_line_count,
                 "total_pcs": total_pcs,
                 "total_volume": round(total_volume, 4),
+                "manual_entry": manual_entry,
                 "updated_at": str(item.get("updated_at", "") or item.get("created_at", "") or ""),
                 "created_at": str(item.get("created_at", "") or ""),
                 "remark": str(item.get("remark", "") or ""),

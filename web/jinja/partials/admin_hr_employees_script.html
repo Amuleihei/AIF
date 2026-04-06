@@ -3,6 +3,8 @@
         var positionLabelMap = {{ data.position_label_map | tojson }};
         var selectedAttendanceNames = [];
         var attendanceSubmitting = false;
+        var attendanceBubbleName = '';
+        var attendanceInputSheetAction = '';
 
         function lockFormSubmit(form) {
             if (!form) return true;
@@ -219,27 +221,73 @@
             input.value = JSON.stringify(selectedAttendanceNames);
         }
 
-        function toggleEmpCard(card, evt) {
-            if (!card) return;
-            if (card.style.display === 'none') return;
+        function openAttendanceActionBubble(card, evt) {
+            if (!card || card.style.display === 'none') return;
+            if (evt) evt.stopPropagation();
             var name = card.getAttribute('data-name') || '';
             if (!name) return;
-            var modeEl = document.getElementById('select-mode');
-            var mode = modeEl ? modeEl.value : 'multi';
-            if (mode === 'single') {
-                selectedAttendanceNames = [];
-                document.querySelectorAll('.emp-card.selected').forEach(function(x){ x.classList.remove('selected'); });
+            attendanceBubbleName = name;
+            var bubble = document.getElementById('attendance-action-bubble');
+            var backdrop = document.getElementById('attendance-action-backdrop');
+            var title = document.getElementById('attendance-action-title');
+            if (!bubble || !title || !backdrop) return;
+            title.textContent = name + ' · {{ texts.get("hr_quick_actions", "快捷操作") }}';
+            bubble.style.display = 'block';
+            backdrop.style.display = 'block';
+            var rect = card.getBoundingClientRect();
+            var bubbleWidth = Math.min(320, window.innerWidth - 24);
+            var anchorX = rect.left + rect.width * 0.5;
+            var left = Math.max(12, Math.min(anchorX - bubbleWidth * 0.5, window.innerWidth - bubbleWidth - 12));
+            var top = rect.top + rect.height * 0.5 + 10;
+            var placedAbove = false;
+            if (top > window.innerHeight - 220) {
+                top = Math.max(12, rect.top - 196);
+                placedAbove = true;
             }
-            var idx = selectedAttendanceNames.indexOf(name);
-            if (idx >= 0) {
-                selectedAttendanceNames.splice(idx, 1);
+            bubble.style.left = left + 'px';
+            bubble.style.top = top + 'px';
+            bubble.style.transformOrigin = (anchorX - left) + 'px ' + (placedAbove ? '100%' : '0px');
+            bubble.style.setProperty('--attendance-arrow-x', (anchorX - left) + 'px');
+            bubble.classList.toggle('is-above-anchor', placedAbove);
+            bubble.classList.remove('is-visible');
+            backdrop.classList.remove('is-visible');
+            document.querySelectorAll('.emp-card.selected').forEach(function(x){ x.classList.remove('selected'); });
+            card.classList.add('selected');
+            card.classList.add('is-pressed');
+            window.setTimeout(function() {
+                if (card) card.classList.remove('is-pressed');
+            }, 140);
+            window.requestAnimationFrame(function() {
+                window.requestAnimationFrame(function() {
+                    backdrop.classList.add('is-visible');
+                    bubble.classList.add('is-visible');
+                });
+            });
+        }
+
+        function closeAttendanceActionBubble() {
+            attendanceBubbleName = '';
+            var bubble = document.getElementById('attendance-action-bubble');
+            var backdrop = document.getElementById('attendance-action-backdrop');
+            if (bubble) {
+                bubble.classList.remove('is-visible');
+                window.setTimeout(function() {
+                    if (!bubble.classList.contains('is-visible')) {
+                        bubble.style.display = 'none';
+                    }
+                }, 180);
+            }
+            if (backdrop) {
+                backdrop.classList.remove('is-visible');
+                window.setTimeout(function() {
+                    if (!backdrop.classList.contains('is-visible')) {
+                        backdrop.style.display = 'none';
+                    }
+                }, 180);
+            }
+            document.querySelectorAll('.emp-card.selected').forEach(function(card) {
                 card.classList.remove('selected');
-            } else {
-                selectedAttendanceNames.push(name);
-                card.classList.add('selected');
-            }
-            renderSelectedCount();
-            syncAttendanceHiddenFields();
+            });
         }
 
         function applyEmpCardFilter() {
@@ -261,10 +309,7 @@
         }
 
         function selectAllVisibleEmpCards() {
-            var modeEl = document.getElementById('select-mode');
-            if (modeEl && modeEl.value === 'single') {
-                modeEl.value = 'multi';
-            }
+            closeAttendanceActionBubble();
             document.querySelectorAll('.emp-card').forEach(function(card) {
                 if (card.style.display === 'none') return;
                 var name = card.getAttribute('data-name') || '';
@@ -323,10 +368,12 @@
                     var card = getEmpCardByName(name);
                     if (!card) return;
                     var attStatus = card.getAttribute('data-att-status') || '';
-                    if (attStatus !== 'sick' && attStatus !== 'leave') return;
+                    if (attStatus !== 'sick' && attStatus !== 'leave' && attStatus !== 'rest') return;
                     var text = attStatus === 'sick'
                         ? '{{ texts.get("hr_status_sick", "病假") }}'
-                        : '{{ texts.get("hr_status_leave", "休假") }}';
+                        : (attStatus === 'rest'
+                            ? '{{ texts.get("rest_label", "休息") }}'
+                            : '{{ texts.get("hr_status_leave", "休假") }}');
                     var ok = confirm(name + ' {{ texts.get("hr_leave_confirm_prompt", "正在") }} ' + text + ' {{ texts.get("hr_leave_confirm_suffix", "确定要出勤吗？取消则跳过该员工。") }}');
                     if (!ok) {
                         skipNames.push(name);
@@ -359,6 +406,114 @@
             if (lockFormSubmit(form)) return;
             attendanceSubmitting = true;
             form.submit();
+        }
+
+        function submitAttendanceForNames(names, action, extra) {
+            if (attendanceSubmitting) return;
+            selectedAttendanceNames = Array.isArray(names) ? names.slice().filter(Boolean) : [];
+            renderSelectedCount();
+            syncAttendanceHiddenFields();
+            if (!selectedAttendanceNames.length) {
+                alert('{{ texts.get("hr_select_employee", "请选择员工") }}');
+                return;
+            }
+            if (action === 'overtime') {
+                var otHoursEl = document.getElementById('attendance-ot-hours');
+                var otHours = extra && typeof extra.overtime_hours !== 'undefined' ? Number(extra.overtime_hours) : Number(otHoursEl ? otHoursEl.value || 0 : 0);
+                if (!Number.isFinite(otHours) || otHours <= 0) {
+                    alert('{{ texts.get("hr_overtime_hours_positive", "加班时间必须大于 0") }}');
+                    return;
+                }
+                if (otHoursEl) otHoursEl.value = String(otHours);
+            }
+            if (action === 'special_off') {
+                var specialHoursEl = document.getElementById('attendance-special-hours');
+                var specialHours = extra && typeof extra.special_hours !== 'undefined' ? Number(extra.special_hours) : Number(specialHoursEl ? specialHoursEl.value || 0 : 0);
+                if (!Number.isFinite(specialHours) || specialHours <= 0) {
+                    alert('{{ texts.get("hr_work_hours_positive", "工作时长必须大于 0") }}');
+                    return;
+                }
+                if (specialHoursEl) specialHoursEl.value = String(specialHours);
+            }
+            submitAttendanceBatch(action);
+        }
+
+        function submitAttendanceBubbleAction(action) {
+            var name = attendanceBubbleName || '';
+            if (!name) return;
+            var triggerBtn = null;
+            if (window.event && window.event.target && window.event.target.classList) {
+                triggerBtn = window.event.target;
+                triggerBtn.classList.add('is-pressed');
+                window.setTimeout(function() {
+                    if (triggerBtn) triggerBtn.classList.remove('is-pressed');
+                }, 140);
+            }
+            if (action === 'overtime') {
+                openAttendanceInputSheet('overtime', name, '{{ texts.get("hr_input_overtime_title", "录入加班时长") }}', '{{ texts.get("hr_input_overtime_subtitle", "请输入这位员工今天的加班时长") }}', '2');
+                return;
+            }
+            if (action === 'special_off') {
+                openAttendanceInputSheet('special_off', name, '{{ texts.get("hr_input_checkout_title", "录入下班工时") }}', '{{ texts.get("hr_input_checkout_subtitle", "请输入这位员工今天已工作时长") }}', '8');
+                return;
+            }
+            closeAttendanceActionBubble();
+            submitAttendanceForNames([name], action, {});
+        }
+
+        function openAttendanceInputSheet(action, name, title, subtitle, defaultValue) {
+            attendanceInputSheetAction = action || '';
+            var sheet = document.getElementById('attendance-input-sheet');
+            var titleEl = document.getElementById('attendance-input-sheet-title');
+            var subEl = document.getElementById('attendance-input-sheet-subtitle');
+            var inputEl = document.getElementById('attendance-input-sheet-value');
+            if (!sheet || !titleEl || !subEl || !inputEl) return;
+            titleEl.textContent = title || '';
+            subEl.textContent = (name ? (name + ' · ') : '') + (subtitle || '');
+            inputEl.value = String(defaultValue || '');
+            closeAttendanceActionBubble();
+            sheet.style.display = 'flex';
+            window.requestAnimationFrame(function() {
+                sheet.classList.add('is-visible');
+                window.setTimeout(function() {
+                    inputEl.focus();
+                    inputEl.select();
+                }, 40);
+            });
+        }
+
+        function closeAttendanceInputSheet() {
+            attendanceInputSheetAction = '';
+            var sheet = document.getElementById('attendance-input-sheet');
+            if (!sheet) return;
+            sheet.classList.remove('is-visible');
+            window.setTimeout(function() {
+                if (!sheet.classList.contains('is-visible')) {
+                    sheet.style.display = 'none';
+                }
+            }, 180);
+        }
+
+        function confirmAttendanceInputSheet() {
+            var name = attendanceBubbleName || '';
+            var action = attendanceInputSheetAction || '';
+            var inputEl = document.getElementById('attendance-input-sheet-value');
+            var raw = inputEl ? inputEl.value : '';
+            var num = Number(raw || 0);
+            if (!name || !action) return;
+            if (!Number.isFinite(num) || num <= 0) {
+                alert(action === 'overtime' ? '{{ texts.get("hr_overtime_hours_positive", "加班时间必须大于 0") }}' : '{{ texts.get("hr_work_hours_positive", "工作时长必须大于 0") }}');
+                if (inputEl) inputEl.focus();
+                return;
+            }
+            closeAttendanceInputSheet();
+            if (action === 'overtime') {
+                submitAttendanceForNames([name], 'overtime', { overtime_hours: num });
+                return;
+            }
+            if (action === 'special_off') {
+                submitAttendanceForNames([name], 'special_off', { special_hours: num });
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -415,6 +570,8 @@
             });
             document.addEventListener('keydown', function(evt) {
                 if (evt.key === 'Escape') {
+                    closeAttendanceInputSheet();
+                    closeAttendanceActionBubble();
                     closeAddEmployeeModal();
                     closeSpecialTaskModal();
                     closeAttendanceViewModal();
@@ -422,6 +579,30 @@
                     closeLeftEmployeesModal();
                 }
             });
+            document.addEventListener('click', function(evt) {
+                var bubble = document.getElementById('attendance-action-bubble');
+                if (!bubble) return;
+                if (bubble.contains(evt.target)) return;
+                if (evt.target.closest && evt.target.closest('.emp-card')) return;
+                closeAttendanceActionBubble();
+            });
+            var sheet = document.getElementById('attendance-input-sheet');
+            if (sheet) {
+                sheet.addEventListener('click', function(evt) {
+                    if (evt.target === sheet) {
+                        closeAttendanceInputSheet();
+                    }
+                });
+            }
+            var inputEl = document.getElementById('attendance-input-sheet-value');
+            if (inputEl) {
+                inputEl.addEventListener('keydown', function(evt) {
+                    if (evt.key === 'Enter') {
+                        evt.preventDefault();
+                        confirmAttendanceInputSheet();
+                    }
+                });
+            }
             renderSelectedCount();
             syncAttendanceHiddenFields();
         });

@@ -121,15 +121,15 @@ BOSS_H5_TEMPLATE = """
         <div class="topbar">
             <div>
                 <strong>{{ (current_user.username or '')|upper }}</strong>
-                <small>{{ texts.boss }}</small>
+                    <small>{{ texts.get('boss_portal_label', texts.boss) }}</small>
             </div>
             <div class="topbar-actions">
                 <a class="btn-mini" href="{{ url_for('report_daily_page', lang=lang) }}">{{ texts.view_daily_report }}</a>
                 {% if period_reports.weekly.generated %}
-                <a class="btn-mini" href="{{ period_reports.weekly.url }}&lang={{ lang }}" style="border-color:#0284c7; color:#075985; background:#e0f2fe;">周报 {{ period_reports.weekly.key }}</a>
+                <a class="btn-mini" href="{{ period_reports.weekly.url }}&lang={{ lang }}" style="border-color:#0284c7; color:#075985; background:#e0f2fe;">{{ texts.get('period_weekly_label', 'Weekly Report') }} {{ period_reports.weekly.key }}</a>
                 {% endif %}
                 {% if period_reports.monthly.generated %}
-                <a class="btn-mini" href="{{ period_reports.monthly.url }}&lang={{ lang }}" style="border-color:#16a34a; color:#166534; background:#dcfce7;">月报 {{ period_reports.monthly.key }}</a>
+                <a class="btn-mini" href="{{ period_reports.monthly.url }}&lang={{ lang }}" style="border-color:#16a34a; color:#166534; background:#dcfce7;">{{ texts.get('period_monthly_label', 'Monthly Report') }} {{ period_reports.monthly.key }}</a>
                 {% endif %}
                 <select onchange="changeLanguage(this.value)">
                     <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ texts.chinese }}</option>
@@ -141,12 +141,12 @@ BOSS_H5_TEMPLATE = """
 
         <div class="title">
             <h1>{{ texts.factory_overview }}</h1>
-            <p>老板端</p>
+            <p>{{ texts.get('boss_portal_label', 'Boss Portal') }}</p>
         </div>
 
         {% if alerts %}
         <div class="card" style="border-left:4px solid #dc2626;">
-            <h2 style="color:#b91c1c;">风险预警</h2>
+            <h2 style="color:#b91c1c;">{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</h2>
             <div style="display:grid; gap:6px;">
                 {% for item in alerts %}
                 <div style="padding:8px 10px; border:1px solid #fee2e2; border-radius:8px; background:#fff1f2; font-size:13px;">
@@ -157,15 +157,57 @@ BOSS_H5_TEMPLATE = """
         </div>
         {% endif %}
 
+        {% if factory_intelligence %}
+        <div class="card" style="border-left:4px solid #0f766e; background:linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);">
+            <h2>{{ texts.get('intelligence_card_title', 'Intelligence View') }}</h2>
+            <div class="grid">
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_root_cause', 'Priority Improvement Stage') }}</div>
+                    <div class="v" style="font-size:18px;">{{ factory_intelligence.priority_stage.name if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.name }}</div>
+                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.priority_stage.reason if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.reason }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('intelligence_symptom_stage', 'Current Pressure Stage') }}</div>
+                    <div class="v" style="font-size:18px;">{{ factory_intelligence.pressure_stage.name if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.name }}</div>
+                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.brief }}</div>
+                </div>
+            </div>
+            {% if factory_intelligence.weekly_progress %}
+            <div class="metric" style="margin-top:10px;">
+                <div class="k">{{ texts.get('weekly_progress_title', 'Weekly Improvement') }}</div>
+                <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.weekly_progress.summary }}</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if ai_deep_monitor and ai_deep_monitor.summary %}
+        <div class="card" style="border-left:4px solid #0f172a; background:linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);">
+            <h2>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h2>
+            <div style="color:#4b5563; font-size:13px;">{{ ai_deep_monitor.generated_at }} · {{ ai_deep_monitor.trigger }}</div>
+            <div style="margin-top:10px; color:#0f172a; line-height:1.6;">{{ ai_deep_monitor.summary }}</div>
+            <div class="grid" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('ai_quick_today_focus', 'Today Focus') }}</div>
+                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.focus[0] if ai_deep_monitor.focus else '-' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</div>
+                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.risks[0] if ai_deep_monitor.risks else '-' }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card">
             <h2>{{ texts.stage_stock }}</h2>
             <div class="grid">
-                <div class="metric"><div class="k">原木库存</div><div class="v">{{ "%.4f"|format(log_stock) }} 缅吨</div></div>
-                <div class="metric"><div class="k">锯解库存</div><div class="v">{{ saw_stock }} 锯解托</div></div>
-                <div class="metric"><div class="k">药浸库存</div><div class="v">{{ dip_stock }} 锯解托</div></div>
-                <div class="metric"><div class="k">待入窑库存</div><div class="v">{{ sorting_stock }} 窑托</div></div>
-                <div class="metric"><div class="k">窑完成库存</div><div class="v">{{ kiln_done_stock }} 窑托</div></div>
-                <div class="metric"><div class="k">成品库存</div><div class="v">{{ product_count }} 托（折合{{ "%.2f"|format(product_m3) }} m³）</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_log_stock_metric', 'Log Stock') }}</div><div class="v">{{ "%.4f"|format(log_stock) }} {{ texts.get('boss_unit_mt_short', 'MT') }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_saw_stock_metric', 'Sawing Stock') }}</div><div class="v">{{ saw_stock }} {{ texts.get('boss_unit_saw_tray', 'saw trays') }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_dip_stock_metric', 'Dipping Stock') }}</div><div class="v">{{ dip_stock }} {{ texts.get('boss_unit_saw_tray', 'saw trays') }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_sorting_stock_metric', 'Pending Kiln Stock') }}</div><div class="v">{{ sorting_stock }} {{ texts.get('boss_unit_kiln_tray', 'kiln trays') }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_kiln_done_stock_metric', 'Kiln Done Stock') }}</div><div class="v">{{ kiln_done_stock }} {{ texts.get('boss_unit_kiln_tray', 'kiln trays') }}</div></div>
+                <div class="metric"><div class="k">{{ texts.get('boss_product_stock_metric', 'Finished Stock') }}</div><div class="v">{{ product_count }} {{ texts.get('boss_unit_piece_with_m3', 'pcs ({m3} m³)').format(m3="%.2f"|format(product_m3)) }}</div></div>
             </div>
         </div>
 

@@ -317,6 +317,7 @@ def get_stock_data(lang='zh'):
     try:
         alert_payload = get_alert_center_payload(limit_recent=20, lang=lang)
         efficiency = alert_payload.get("efficiency", {}) if isinstance(alert_payload, dict) else {}
+        factory_intelligence = alert_payload.get("factory_intelligence", {}) if isinstance(alert_payload, dict) else {}
         radar = efficiency.get("radar", {}) if isinstance(efficiency, dict) else {}
         payload_labels = efficiency.get("radar_labels", []) if isinstance(efficiency, dict) else []
         if isinstance(payload_labels, list) and len(payload_labels) >= 5:
@@ -337,7 +338,14 @@ def get_stock_data(lang='zh'):
             "month": _radar_vals("month"),
         }
     except Exception:
+        factory_intelligence = {}
         pass
+
+    try:
+        from web.services.ai_monitor_service import get_cached_deep_monitor
+        ai_deep_monitor = get_cached_deep_monitor(lang)
+    except Exception:
+        ai_deep_monitor = {}
 
     stock_payload = {
         'log_stock': log_stock,
@@ -356,6 +364,8 @@ def get_stock_data(lang='zh'):
         'shipping_summary': shipping_summary,
         'overview_radar_labels': overview_radar_labels,
         'overview_radar': overview_radar,
+        'factory_intelligence': factory_intelligence,
+        'ai_deep_monitor': ai_deep_monitor,
         'kiln_status': kiln_status,
         'system_health': get_system_health_snapshot(),
         'lang': lang,

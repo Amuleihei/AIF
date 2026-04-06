@@ -19,6 +19,7 @@ backups/
 # runtime
 *.pid
 out/
+web/static
 
 # secrets
 .env
@@ -39,3 +40,9 @@ logo.png
 
 # local certs
 ssl/
+
+# local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite

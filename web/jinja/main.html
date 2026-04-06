@@ -27,12 +27,16 @@
             {% set role = (current_user.role or '')|lower %}
             {% set can_hr_employees = current_user.has_permission('admin') or role in ['finance', 'stats'] %}
             {% set can_hr_attendance = can_hr_employees %}
+            {% set can_finance = current_user.has_permission('admin') or role in ['finance'] %}
             {% if current_user.has_permission('admin') %}
             <a href="{{ url_for('admin_root', lang=lang) }}">{{ texts.get('admin_overview_link', texts.manage_link) }}</a> |
             <a href="{{ url_for('admin_alert_center', lang=lang) }}">{{ texts.get('alert_center_link', 'Alert Center') }}</a> |
             {% endif %}
             {% if can_hr_attendance %}
             <a href="{{ url_for('admin_hr_attendance', lang=lang) }}">{{ texts.get('attendance_mgmt_link', '考勤管理') }}</a> |
+            {% endif %}
+            {% if can_finance %}
+            <a href="{{ url_for('admin_finance', lang=lang) }}">{{ texts.get('finance_workbench_title', '财务工作台') }}</a> |
             {% endif %}
             <a href="{{ url_for('logout') }}" class="logout-btn">{{ texts.logout }}</a>
         </div>
@@ -54,18 +58,117 @@
             <ul id="entry-reminder-float-list" class="entry-reminder-float-list"></ul>
         </div>
 
-        {% if alerts %}
-        <div class="section" style="border-left:4px solid #dc2626;">
-            <h2 style="color:#b91c1c;">⚠️ {{ texts.get('system_health_warn', '预警') }}</h2>
-            <div style="display:grid; gap:6px;">
-                {% for item in alerts %}
-                <div style="padding:8px 10px; border:1px solid #fee2e2; border-radius:8px; background:#fff1f2; font-size:13px;">
-                    {{ item.text }}
+        {% if factory_intelligence %}
+        <div class="section" style="border-left:4px solid #0f766e; background:
+            radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 34%),
+            linear-gradient(180deg, rgba(240, 253, 250, 0.95) 0%, #ffffff 100%);
+            box-shadow:0 18px 40px rgba(15, 23, 42, 0.06);">
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                <div style="max-width:680px;">
+                    <h2 style="margin:0;">🧠 {{ texts.get('intelligence_card_title', '智能判断') }}</h2>
+                    <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ texts.get('intelligence_card_desc', 'AI持续监测全流程节拍，判断当前压力位置、优先提升环节和协同动作。') }}</p>
                 </div>
-                {% endfor %}
+                <div style="padding:8px 12px; border-radius:999px; background:rgba(255,255,255,0.72); border:1px solid rgba(148,163,184,0.22); color:#0f766e; font-size:12px; backdrop-filter:blur(12px);">
+                    {{ factory_intelligence.overview }}
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:14px;">
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_symptom_stage', '当前压力位置') }}</div>
+                    <div style="margin-top:6px; font-size:18px; font-weight:700; color:#0f172a;">{{ factory_intelligence.pressure_stage.name if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.name }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.pressure_stage.reason if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.reason }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_root_cause', '优先提升环节') }}</div>
+                    <div style="margin-top:6px; font-size:18px; font-weight:700; color:#0f172a;">{{ factory_intelligence.priority_stage.name if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.name }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.priority_stage.reason if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.reason }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_recommendations', '今日建议') }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[0] if factory_intelligence.recommendations else '-' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[1] if factory_intelligence.recommendations|length > 1 else '' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[2] if factory_intelligence.recommendations|length > 2 else '' }}</div>
+                </div>
+            </div>
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); color:#0f172a; line-height:1.6;">
+                <strong style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_brief', '智能摘要') }}</strong>
+                <div style="margin-top:6px;">{{ factory_intelligence.brief }}</div>
+            </div>
+            {% if factory_intelligence.weekly_progress %}
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(15,118,110,0.18); border-radius:14px; background:rgba(240,253,250,0.92); color:#0f172a; line-height:1.6;">
+                <strong style="font-size:12px; color:#64748b;">{{ texts.get('weekly_progress_title', '本周提升跟踪') }}</strong>
+                <div style="margin-top:6px;">{{ factory_intelligence.weekly_progress.summary }}</div>
+                <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.weekly_progress.actions[0] if factory_intelligence.weekly_progress.actions else '' }}</div>
+                <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.weekly_progress.actions[1] if factory_intelligence.weekly_progress.actions|length > 1 else '' }}</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if ai_deep_monitor and ai_deep_monitor.summary %}
+        <div class="section" style="border-left:4px solid #0f172a; background:
+            radial-gradient(circle at top left, rgba(15, 23, 42, 0.08), transparent 32%),
+            linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+            box-shadow:0 18px 36px rgba(15, 23, 42, 0.05);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div>
+                    <h2 style="margin:0;">{{ texts.get('intelligence_panel_title', 'AI建议') }}</h2>
+                    <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.generated_at }} · {{ ai_deep_monitor.trigger }}</p>
+                </div>
+                <div style="padding:8px 12px; border-radius:999px; background:#f8fafc; border:1px solid #e2e8f0; font-size:12px; color:#334155;">
+                    {{ ai_deep_monitor.context_overview.production or factory_intelligence.brief }}
+                </div>
+            </div>
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.88); color:#0f172a; line-height:1.6;">
+                {{ ai_deep_monitor.summary }}
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:12px;">
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:#fff;">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('ai_quick_today_focus', '看今日重点') }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.focus[0] if ai_deep_monitor.focus else '-' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.focus[1] if ai_deep_monitor.focus|length > 1 else '' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.focus[2] if ai_deep_monitor.focus|length > 2 else '' }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:#fff;">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('risk_alerts_title', '风险预警') }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.risks[0] if ai_deep_monitor.risks else '-' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.risks[1] if ai_deep_monitor.risks|length > 1 else '' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.risks[2] if ai_deep_monitor.risks|length > 2 else '' }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:#fff;">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_recommendations', '今日建议') }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.actions[0] if ai_deep_monitor.actions else '-' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.actions[1] if ai_deep_monitor.actions|length > 1 else '' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ ai_deep_monitor.actions[2] if ai_deep_monitor.actions|length > 2 else '' }}</div>
+                </div>
             </div>
         </div>
         {% endif %}
+
+        <div class="section" id="web-ai-assistant" style="border-left:4px solid #0f766e; background:
+            radial-gradient(circle at top right, rgba(14, 165, 165, 0.10), transparent 34%),
+            linear-gradient(180deg, #f7fffe 0%, #ffffff 100%);
+            box-shadow:0 18px 36px rgba(15, 23, 42, 0.05);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div>
+                    <h2 style="margin:0;">{{ texts.get('ai_assistant_title', 'AI助手') }}</h2>
+                    <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ texts.get('ai_assistant_desc', '让AI结合当前库存、窑状态、节拍和风险，帮你判断今天先抓什么。') }}</p>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                <button type="button" onclick="fillAiAssistantPrompt('{{ texts.get('ai_prompt_today_focus', '根据当前数据，今天最需要先处理的3件事是什么？')|e }}')" style="background:#0f766e;">{{ texts.get('ai_quick_today_focus', '看今日重点') }}</button>
+                <button type="button" onclick="fillAiAssistantPrompt('{{ texts.get('ai_prompt_top_risk', '当前最值得优先处理的风险是什么？为什么？')|e }}')" style="background:#0f766e;">{{ texts.get('ai_quick_top_risk', '看最急风险') }}</button>
+                <button type="button" onclick="fillAiAssistantPrompt('{{ texts.get('ai_prompt_backlog', '如果今天想减少积压，应该先调哪一段？')|e }}')" style="background:#0f766e;">{{ texts.get('ai_quick_backlog', '看积压处理') }}</button>
+            </div>
+            <div style="margin-top:12px;">
+                <textarea id="ai-assistant-input" rows="4" placeholder="{{ texts.get('ai_assistant_placeholder', '例如：根据现在的库存、窑状态和班组情况，今天我该怎么排班和处理积压？') }}" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:12px; resize:vertical; font:inherit; box-sizing:border-box; background:rgba(255,255,255,0.86);"></textarea>
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+                    <div id="ai-assistant-status" style="font-size:12px; color:#6b7280;">{{ texts.get('ai_assistant_hint', '回车换行，Ctrl+Enter 可直接发送。') }}</div>
+                    <button type="button" id="ai-assistant-submit" onclick="submitAiAssistant()" style="background:#0f766e;">{{ texts.get('ai_assistant_send', '发送给AI') }}</button>
+                </div>
+            </div>
+            <div id="ai-assistant-answer" style="display:none; margin-top:12px; padding:14px; border:1px solid #dbe3ef; border-radius:12px; background:rgba(255,255,255,0.92); color:#111827; white-space:pre-wrap; line-height:1.6; box-shadow:inset 0 1px 0 rgba(255,255,255,0.8);"></div>
+        </div>
 
         <!-- 工厂总览 -->
         <div class="section">
@@ -378,6 +481,7 @@
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button type="button" onclick="openFinishedInventoryModal()">{{ texts.view_finished_inventory }}</button>
                     <button type="button" onclick="openCreateShipmentModal()" style="background:#0d6efd;">{{ texts.create_shipment }}</button>
+                    <button type="button" onclick="openManualShipmentModal()" style="background:#0f766e;">{{ texts.create_manual_shipment }}</button>
                     <button type="button" onclick="openShippingBoardModal()" style="background:#6c757d;">{{ texts.view_logistics_board }}</button>
                 </div>
             </div>
@@ -670,7 +774,10 @@
             <div class="modal-box" style="width:min(1240px, 99vw);">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
                     <h3 style="margin:0;">{{ texts.shipment_status_title }}</h3>
-                    <button type="button" onclick="loadShippingBoard()" style="background:#6c757d;">{{ texts.refresh_btn }}</button>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" onclick="openManualShipmentModal()" style="background:#0f766e;">{{ texts.create_manual_shipment }}</button>
+                        <button type="button" onclick="loadShippingBoard()" style="background:#6c757d;">{{ texts.refresh_btn }}</button>
+                    </div>
                 </div>
                 <table class="tray-grid" style="margin-top:14px;">
                     <thead>
@@ -693,6 +800,55 @@
                 </table>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <button type="button" onclick="closeShippingBoardModal()">{{ texts.close_btn }}</button>
+                </div>
+            </div>
+        </div>
+        <div id="manual-shipment-modal" class="modal-mask">
+            <div class="modal-box" style="width:min(760px, 96vw);">
+                <h3>{{ texts.shipment_manual_title }}</h3>
+                <div class="form-group">
+                    <label>{{ texts.customer_label }}</label>
+                    <input type="text" id="manual-shipment-customer" style="width:240px;" value="手动补录">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.destination_label }}</label>
+                    <input type="text" id="manual-shipment-destination" style="width:240px;" value="仰光仓">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.departure_at_label }}</label>
+                    <input type="datetime-local" id="manual-shipment-departure-at" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.vehicle_no_label }}</label>
+                    <input type="text" id="manual-shipment-vehicle-no" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.driver_label }}</label>
+                    <input type="text" id="manual-shipment-driver-name" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.tracking_no_label }}</label>
+                    <input type="text" id="manual-shipment-tracking-no" style="width:240px;">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.quantity_label }}</label>
+                    <input type="number" id="manual-shipment-total-pcs" style="width:240px;" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label>m³</label>
+                    <input type="number" id="manual-shipment-total-volume" style="width:240px;" min="0" step="0.0001" value="0">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.eta_hours_label }}</label>
+                    <input type="number" id="manual-shipment-eta-hours" style="width:240px;" value="36" min="1">
+                </div>
+                <div class="form-group">
+                    <label>{{ texts.remark_label }}</label>
+                    <input type="text" id="manual-shipment-remark" style="width:min(560px, 100%);" placeholder="{{ texts.shipment_manual_hint }}">
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                    <button type="button" onclick="createManualShipment()" style="background:#0f766e;">{{ texts.create_manual_shipment }}</button>
+                    <button type="button" onclick="closeManualShipmentModal()">{{ texts.close_btn }}</button>
                 </div>
             </div>
         </div>
