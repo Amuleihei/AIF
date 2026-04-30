@@ -199,9 +199,98 @@
         const AI_ASSISTANT_DONE_LABEL = `{{ texts.get('ai_assistant_done', '分析完成，可继续追问。') }}`;
         const AI_ASSISTANT_FAILED_LABEL = `{{ texts.get('ai_assistant_failed', 'AI请求失败') }}`;
         let logEntryDraft = { driver_name: '', truck_number: '', details: [], rules: [] };
+        let logEntryLastLengthFt = 3;
+        const LOG_ENTRY_LAST_LENGTH_KEY = 'aif_log_entry_last_length_ft';
+        let sawLogLastLengthFt = 3;
+        const SAW_LOG_LAST_LENGTH_KEY = 'aif_saw_log_last_length_ft';
         let logDriverFetchTimer = null;
         let sawMachineDraft = [];
         let currentSawLogMachineNo = null;
+
+        function setModalOpenState(modalId, open) {
+            const modal = document.getElementById(modalId);
+            if (!modal) return;
+            modal.style.display = open ? 'flex' : 'none';
+            if (open) {
+                document.body.classList.add('modal-open');
+                const box = modal.querySelector('.modal-box');
+                if (box) box.scrollTop = 0;
+                modal.scrollTop = 0;
+            } else if (!document.querySelector('.modal-mask[style*="display: flex"]')) {
+                document.body.classList.remove('modal-open');
+            }
+        }
+
+        function sanitizeIntegerInputValue(value) {
+            return String(value || '').replace(/[^\d]/g, '');
+        }
+
+        function sanitizeDecimalInputValue(value, digits = 4) {
+            let raw = String(value || '').replace(/[^\d.]/g, '');
+            const dot = raw.indexOf('.');
+            if (dot >= 0) {
+                raw = raw.slice(0, dot + 1) + raw.slice(dot + 1).replace(/\./g, '');
+                if (digits >= 0) {
+                    raw = raw.slice(0, dot + 1) + raw.slice(dot + 1, dot + 1 + digits);
+                }
+            }
+            return raw;
+        }
+
+        function normalizeLogLengthFt(value) {
+            const n = Number(value);
+            if (n === 3 || n === 3.7 || n === 4) return n;
+            return 3;
+        }
+
+        function loadLogEntryLastLengthFt() {
+            try {
+                const raw = localStorage.getItem(LOG_ENTRY_LAST_LENGTH_KEY);
+                return normalizeLogLengthFt(raw);
+            } catch (_) {
+                return 3;
+            }
+        }
+
+        function persistLogEntryLastLengthFt(value) {
+            const next = normalizeLogLengthFt(value);
+            logEntryLastLengthFt = next;
+            try {
+                localStorage.setItem(LOG_ENTRY_LAST_LENGTH_KEY, String(next));
+            } catch (_) {}
+            return next;
+        }
+
+        function loadSawLogLastLengthFt() {
+            try {
+                const raw = localStorage.getItem(SAW_LOG_LAST_LENGTH_KEY);
+                return normalizeLogLengthFt(raw);
+            } catch (_) {
+                return 3;
+            }
+        }
+
+        function persistSawLogLastLengthFt(value) {
+            const next = normalizeLogLengthFt(value);
+            sawLogLastLengthFt = next;
+            try {
+                localStorage.setItem(SAW_LOG_LAST_LENGTH_KEY, String(next));
+            } catch (_) {}
+            return next;
+        }
+
+        function bindSanitizedInput(input, mode = 'int', digits = 4, onChange = null) {
+            if (!input) return;
+            const sanitize = () => {
+                const next = mode === 'decimal'
+                    ? sanitizeDecimalInputValue(input.value, digits)
+                    : sanitizeIntegerInputValue(input.value);
+                if (next !== input.value) input.value = next;
+                if (typeof onChange === 'function') onChange();
+            };
+            input.addEventListener('input', sanitize);
+            input.addEventListener('change', sanitize);
+        }
 
         function fillAiAssistantPrompt(text) {
             const input = document.getElementById('ai-assistant-input');
@@ -511,7 +600,7 @@
                 const length_ft = Number(row.querySelector('.led-length').value || 3);
                 const consumed_mt = calcLogEntryMt(size_mm, length_ft, quantity);
                 return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
-            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && [3, 3.7, 4].includes(item.length_ft));
             const total = rows.reduce((sum, row) => {
                 return sum + calcLogEntryMt(
                     row.querySelector('.led-size').value,
@@ -540,6 +629,12 @@
             const lastSizeInput = body.querySelector('tr:last-child .led-size');
             const nextAutoSize = lastSizeInput ? (Number(lastSizeInput.value || 0) + 1) : 15;
             const sizeVal = Number(detail.size_mm || 0) > 0 ? Number(detail.size_mm) : nextAutoSize;
+            const lengthVal = normalizeLogLengthFt(
+                Object.prototype.hasOwnProperty.call(detail || {}, 'length_ft')
+                    ? detail.length_ft
+                    : logEntryLastLengthFt
+            );
+            persistLogEntryLastLengthFt(lengthVal);
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>
@@ -548,8 +643,9 @@
                 <td><input type="text" class="led-qty" inputmode="numeric" pattern="[0-9]*" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
                 <td>
                     <select class="led-length" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:90px; font-size:12px;">
-                        <option value="3"${Number(detail.length_ft || 3) === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
-                        <option value="4"${Number(detail.length_ft || 3) === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
+                        <option value="3"${lengthVal === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
+                        <option value="3.7"${lengthVal === 3.7 ? ' selected' : ''}>3.7</option>
+                        <option value="4"${lengthVal === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
                     </select>
                 </td>
                 <td><input type="text" class="led-mt" readonly value="${detail.consumed_mt ? Number(detail.consumed_mt).toFixed(4) : ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px; background:#f8f9fa;"></td>
@@ -575,8 +671,14 @@
                 });
             });
             [lengthInput].forEach(input => {
-                input.addEventListener('input', renderLogEntryDetailTotal);
-                input.addEventListener('change', renderLogEntryDetailTotal);
+                input.addEventListener('input', () => {
+                    persistLogEntryLastLengthFt(input.value);
+                    renderLogEntryDetailTotal();
+                });
+                input.addEventListener('change', () => {
+                    persistLogEntryLastLengthFt(input.value);
+                    renderLogEntryDetailTotal();
+                });
             });
             sizeInput.addEventListener('keydown', event => {
                 if (event.key !== 'Enter') return;
@@ -605,7 +707,7 @@
                 const length_ft = Number(row.querySelector('.led-length').value || 3);
                 const consumed_mt = calcLogEntryMt(size_mm, length_ft, quantity);
                 return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
-            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && [3, 3.7, 4].includes(item.length_ft));
             logEntryDraft = {
                 driver_name: (document.getElementById('log-modal-driver').value || '').trim(),
                 truck_number: (document.getElementById('log-modal-truck').value || '').trim(),
@@ -645,11 +747,11 @@
             body.innerHTML = '';
             const rows = hiddenDetails.length ? hiddenDetails : [{}];
             rows.forEach((detail) => addLogEntryDetailRow(detail, 'qty'));
-            document.getElementById('log-entry-modal').style.display = 'flex';
+            setModalOpenState('log-entry-modal', true);
         }
 
         function closeLogEntryModal() {
-            document.getElementById('log-entry-modal').style.display = 'none';
+            setModalOpenState('log-entry-modal', false);
         }
 
         function saveLogEntryModal() {
@@ -695,6 +797,9 @@
             }
             return true;
         }
+
+        logEntryLastLengthFt = loadLogEntryLastLengthFt();
+        sawLogLastLengthFt = loadSawLogLastLengthFt();
 
         function emptySawMachineRecord(machineNo) {
             return {
@@ -786,13 +891,17 @@
                 tr.dataset.machineNo = item.machine_no;
                 tr.innerHTML = `
                     <td>${item.machine_no}</td>
-                    <td><input type="number" class="sm-mt" step="0.0001" value="${item.saw_mt}" placeholder="{{ texts.placeholder_saw_mt }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
-                    <td><input type="number" class="sm-trays" min="0" value="${item.saw_trays}" placeholder="{{ texts.placeholder_tray }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
-                    <td><input type="number" class="sm-bark" step="0.0001" min="0" value="${item.bark_m3}" placeholder="{{ texts.placeholder_m3 }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
-                    <td><input type="number" class="sm-dust" min="0" value="${item.dust_bags}" placeholder="{{ texts.placeholder_bag }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                    <td><input type="text" class="sm-mt" inputmode="decimal" value="${item.saw_mt}" placeholder="{{ texts.placeholder_saw_mt }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
+                    <td><input type="text" class="sm-trays" inputmode="numeric" value="${item.saw_trays}" placeholder="{{ texts.placeholder_tray }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                    <td><input type="text" class="sm-bark" inputmode="decimal" value="${item.bark_m3}" placeholder="{{ texts.placeholder_m3 }}" style="height:30px; padding:4px 6px; font-size:12px; width:120px;"></td>
+                    <td><input type="text" class="sm-dust" inputmode="numeric" value="${item.dust_bags}" placeholder="{{ texts.placeholder_bag }}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
                     <td><button type="button" onclick="openSawLogDetailModal(${item.machine_no})">{{ texts.saw_machine_add_log_btn }}</button></td>
                 `;
                 body.appendChild(tr);
+                bindSanitizedInput(tr.querySelector('.sm-mt'), 'decimal', 4);
+                bindSanitizedInput(tr.querySelector('.sm-trays'), 'int');
+                bindSanitizedInput(tr.querySelector('.sm-bark'), 'decimal', 4);
+                bindSanitizedInput(tr.querySelector('.sm-dust'), 'int');
             });
         }
 
@@ -816,11 +925,11 @@
         function openSawMachineModal() {
             buildSawMachineDraft();
             renderSawMachineModal();
-            document.getElementById('saw-machine-modal').style.display = 'flex';
+            setModalOpenState('saw-machine-modal', true);
         }
 
         function closeSawMachineModal() {
-            document.getElementById('saw-machine-modal').style.display = 'none';
+            setModalOpenState('saw-machine-modal', false);
         }
 
         function finishSawMachineModal(shouldSubmit) {
@@ -885,14 +994,21 @@
 
         function _addSawLogRow(bodyId, detail = {}, focusField = 'size') {
             const body = document.getElementById(bodyId);
+            const lengthVal = normalizeLogLengthFt(
+                Object.prototype.hasOwnProperty.call(detail || {}, 'length_ft')
+                    ? detail.length_ft
+                    : sawLogLastLengthFt
+            );
+            persistSawLogLastLengthFt(lengthVal);
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td><input type="number" class="sld-size" min="1" value="${detail.size_mm || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
-                <td><input type="number" class="sld-qty" min="1" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td><input type="text" class="sld-size" inputmode="numeric" value="${detail.size_mm || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
+                <td><input type="text" class="sld-qty" inputmode="numeric" value="${detail.quantity || ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px;"></td>
                 <td>
                     <select class="sld-length" style="height:30px; padding:2px 6px; border:1px solid #ddd; border-radius:4px; width:90px; font-size:12px;">
-                        <option value="3"${Number(detail.length_ft || 3) === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
-                        <option value="4"${Number(detail.length_ft || 3) === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
+                        <option value="3"${lengthVal === 3 ? ' selected' : ''}>{{ texts.saw_log_length_3 }}</option>
+                        <option value="3.7"${lengthVal === 3.7 ? ' selected' : ''}>3.7</option>
+                        <option value="4"${lengthVal === 4 ? ' selected' : ''}>{{ texts.saw_log_length_4 }}</option>
                     </select>
                 </td>
                 <td><input type="text" class="sld-mt" readonly value="${detail.consumed_mt ? Number(detail.consumed_mt).toFixed(4) : ''}" style="height:30px; padding:4px 6px; font-size:12px; width:110px; background:#f8f9fa;"></td>
@@ -902,9 +1018,17 @@
             const sizeInput = tr.querySelector('.sld-size');
             const qtyInput = tr.querySelector('.sld-qty');
             const lengthInput = tr.querySelector('.sld-length');
-            [sizeInput, qtyInput, lengthInput].forEach(input => {
-                input.addEventListener('input', renderSawLogDetailTotal);
-                input.addEventListener('change', renderSawLogDetailTotal);
+            bindSanitizedInput(sizeInput, 'int', 0, renderSawLogDetailTotal);
+            bindSanitizedInput(qtyInput, 'int', 0, renderSawLogDetailTotal);
+            [lengthInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    persistSawLogLastLengthFt(input.value);
+                    renderSawLogDetailTotal();
+                });
+                input.addEventListener('change', () => {
+                    persistSawLogLastLengthFt(input.value);
+                    renderSawLogDetailTotal();
+                });
             });
             sizeInput.addEventListener('keydown', event => {
                 if (event.key !== 'Enter') return;
@@ -941,7 +1065,7 @@
                 const length_ft = Number(row.querySelector('.sld-length').value || 3);
                 const consumed_mt = calcSawLogConsumedMt(size_mm, length_ft, quantity);
                 return { size_mm, quantity, length_ft, consumed_mt: Number(consumed_mt.toFixed(4)) };
-            }).filter(item => item.size_mm > 0 && item.quantity > 0 && (item.length_ft === 3 || item.length_ft === 4));
+            }).filter(item => item.size_mm > 0 && item.quantity > 0 && [3, 3.7, 4].includes(item.length_ft));
         }
 
         function openSawLogDetailModal(machineNo) {
@@ -958,11 +1082,11 @@
             const pending = Array.isArray(machine.pending_log_details) && machine.pending_log_details.length ? machine.pending_log_details : [];
             pending.forEach((detail, idx) => addPendingSawLogDetailRow(detail, idx === 0 ? 'size' : 'size'));
             renderSawPendingDetailTotal();
-            document.getElementById('saw-log-detail-modal').style.display = 'flex';
+            setModalOpenState('saw-log-detail-modal', true);
         }
 
         function closeSawLogDetailModal() {
-            document.getElementById('saw-log-detail-modal').style.display = 'none';
+            setModalOpenState('saw-log-detail-modal', false);
             currentSawLogMachineNo = null;
         }
 
@@ -2985,6 +3109,11 @@
         ['saw_tm_input', 'saw_trays_input', 'bark_m3_input', 'dust_bags_input'].forEach(id => {
             const input = document.getElementById(id);
             if (!input) return;
+            if (id === 'saw_tm_input' || id === 'bark_m3_input') {
+                bindSanitizedInput(input, 'decimal', 4);
+            } else {
+                bindSanitizedInput(input, 'int');
+            }
             input.addEventListener('input', () => {
                 const hidden = document.getElementById('saw_machine_payload');
                 if (hidden) hidden.value = '';

@@ -206,6 +206,156 @@ def _guess_team(position: str) -> str:
     return "未分组"
 
 
+def _attendance_bucket(code: str) -> str:
+    text = str(code or "").strip().lower()
+    if text in ("present", "lunch", "overtime", "出勤中", "午餐休息", "加班中"):
+        return "on_duty"
+    if text in ("off", "已下班"):
+        return "checked_out"
+    if text in ("leave", "sick", "rest", "absent", "休假", "病假", "休息", "缺勤"):
+        return "unavailable"
+    return "other"
+
+
+def _role_team_key(team: str, position: str) -> str:
+    team_text = str(team or "").strip().lower()
+    pos_text = str(position or "").strip().lower()
+    if ("锯工组" in str(team or "")) or ("saw" in team_text) or ("锯" in str(position or "")) or ("saw" in pos_text):
+        return "saw"
+    if ("拣选组" in str(team or "")) or ("sorting" in team_text) or ("拣选" in str(position or "")) or ("二选" in str(position or "")) or ("sort" in pos_text):
+        return "sorting"
+    if ("药浸&烘干组" in str(team or "")) or ("kiln" in team_text) or ("药浸" in str(position or "")) or ("烘干" in str(position or "")) or ("锅炉" in str(position or "")) or ("dip" in pos_text) or ("kiln" in pos_text):
+        return "dip_kiln"
+    if ("设备保障" in str(team or "")) or ("电工" in str(position or "")) or ("叉车" in str(position or "")) or ("electric" in pos_text) or ("forklift" in pos_text):
+        return "equipment"
+    if ("办公室" in str(team or "")) or ("财务" in str(position or "")) or ("统计" in str(position or "")) or ("经理" in str(position or "")):
+        return "office"
+    if ("安保组" in str(team or "")) or ("保安" in str(position or "")) or ("security" in pos_text):
+        return "security"
+    return "other"
+
+
+def _team_display_name(team_key: str) -> str:
+    mapping = {
+        "saw": "锯工组",
+        "sorting": "拣选组",
+        "dip_kiln": "药浸&烘干组",
+        "equipment": "设备保障",
+        "office": "办公室",
+        "security": "安保组",
+        "other": "其他",
+    }
+    return str(mapping.get(str(team_key or "").strip(), "其他"))
+
+
+def _build_team_live_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    stats: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status", "") or "") == "离职":
+            continue
+        team = str(row.get("team", "") or "")
+        position = str(row.get("position", "") or "")
+        key = _role_team_key(team, position)
+        bucket = _attendance_bucket(str(row.get("today_attendance_status", "") or row.get("today_attendance_status_text", "") or ""))
+        current = stats.setdefault(
+            key,
+            {
+                "team_key": key,
+                "team_name": _team_display_name(key),
+                "total": 0,
+                "on_duty": 0,
+                "unavailable": 0,
+                "checked_out": 0,
+                "overtime": 0,
+            },
+        )
+        current["total"] += 1
+        if bucket == "on_duty":
+            current["on_duty"] += 1
+        elif bucket == "unavailable":
+            current["unavailable"] += 1
+        elif bucket == "checked_out":
+            current["checked_out"] += 1
+        if str(row.get("today_attendance_status", "") or "") == "overtime":
+            current["overtime"] += 1
+    return stats
+
+
+def _build_saw_operation_stats(d: dict[str, Any], day_text: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    org = d.get("org", {}) if isinstance(d.get("org"), dict) else {}
+    saw_cfg = org.get("saw_piecework", {}) if isinstance(org.get("saw_piecework"), dict) else {}
+    raw_bindings = saw_cfg.get("bindings", []) if isinstance(saw_cfg.get("bindings"), list) else []
+    configured_machines: list[int] = []
+    expected_staff = 0
+    for row in raw_bindings:
+        if not isinstance(row, dict):
+            continue
+        machine_no = _to_int(row.get("machine_no"), 0)
+        if 1 <= machine_no <= 6 and machine_no not in configured_machines:
+            configured_machines.append(machine_no)
+            expected_staff += 1
+            if str(row.get("assistant_name", "") or "").strip():
+                expected_staff += 1
+    if not configured_machines:
+        configured_machines = [1, 2, 3, 4, 5, 6]
+    machine_stats: dict[int, dict[str, Any]] = {}
+    session = None
+    try:
+        session = Session()
+        db_rows = (
+            session.query(SawMachineRecord.machine_no, SawMachineRecord.saw_trays, SawMachineRecord.saw_mt, SawMachineRecord.created_at)
+            .all()
+        )
+        for machine_no, saw_trays, saw_mt, created_at in db_rows:
+            rec_day = _record_day_text(created_at)
+            if rec_day != day_text:
+                continue
+            key = _to_int(machine_no, 0)
+            if key < 1:
+                continue
+            item = machine_stats.setdefault(key, {"machine_no": key, "trays": 0, "mt": 0.0})
+            item["trays"] += max(0, _to_int(saw_trays, 0))
+            item["mt"] = round(float(item.get("mt", 0.0)) + max(0.0, _to_float(saw_mt, 0.0)), 4)
+    except Exception:
+        machine_stats = {}
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+
+    team_stats = _build_team_live_stats(rows)
+    saw_team = team_stats.get("saw", {}) if isinstance(team_stats.get("saw"), dict) else {}
+    on_duty = _to_int(saw_team.get("on_duty"), 0)
+    unavailable = _to_int(saw_team.get("unavailable"), 0)
+    configured_count = len(configured_machines)
+    running_machines = sorted([m for m, item in machine_stats.items() if _to_int(item.get("trays"), 0) > 0 or _to_float(item.get("mt"), 0.0) > 0])
+    idle_machines = [m for m in configured_machines if m not in running_machines]
+    if len(running_machines) >= configured_count:
+        likely_reason = "running_full"
+    elif on_duty < max(1, configured_count):
+        likely_reason = "staff_shortage"
+    elif unavailable > 0:
+        likely_reason = "attendance_gap"
+    else:
+        likely_reason = "material_or_dispatch"
+    return {
+        "configured_machine_count": configured_count,
+        "configured_machines": configured_machines,
+        "running_machine_count": len(running_machines),
+        "running_machines": running_machines,
+        "idle_machines": idle_machines,
+        "expected_staff": expected_staff,
+        "saw_team_on_duty": on_duty,
+        "saw_team_unavailable": unavailable,
+        "likely_reason": likely_reason,
+        "machine_output": [machine_stats[k] for k in sorted(machine_stats.keys())][:6],
+    }
+
+
 def _parse_kv(parts: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for tok in parts:
@@ -1465,6 +1615,8 @@ def get_hr_employees_payload() -> dict[str, Any]:
         for r in rows
         if str(r.get("today_attendance_status", "") or "") == "absent" and str(r.get("name", "") or "").strip()
     ]
+    team_live_stats = _build_team_live_stats(rows)
+    saw_operation_stats = _build_saw_operation_stats(d, today, rows)
     rows.sort(key=lambda r: (0 if r.get("status") != "离职" else 1, str(r.get("name", ""))))
     return {
         "employee_total": len(rows),
@@ -1483,6 +1635,8 @@ def get_hr_employees_payload() -> dict[str, Any]:
         "attendance_day": today,
         "absent_today_names": absent_today_names,
         "absent_today_count": len(absent_today_names),
+        "team_live_stats": team_live_stats,
+        "saw_operation_stats": saw_operation_stats,
     }
 
 

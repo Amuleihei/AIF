@@ -1,4 +1,5 @@
 body { margin: 12px; background: #f5f5f5; }
+body.modal-open { overflow: hidden; }
 .aif-logo-wrap { display:flex; justify-content:center; margin:4px 0 10px; }
 .aif-logo { width:min(220px, 62vw); height:auto; display:block; }
 .container { max-width: 1200px; margin: 0 auto; background: white; padding: 14px; border-radius: 8px; box-shadow: 0 1px 8px rgba(0,0,0,0.09); }
@@ -127,8 +128,8 @@ button:hover { background: #218838; }
 .kiln-actions-secondary { margin-top: 15px; margin-bottom: 0; }
 .kiln .kiln-btn-compact { flex: 1 1 64px; min-width: 64px; }
 .kiln .kiln-btn-wide { flex: 1 1 146px; min-width: 132px; }
-.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 11000; display: none; align-items: center; justify-content: center; }
-.modal-box { width: min(900px, 94vw); max-height: 86vh; overflow: auto; background: #fff; border-radius: 10px; padding: 16px; }
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 11000; display: none; align-items: center; justify-content: center; overflow-y: auto; padding: 18px 12px; box-sizing: border-box; }
+.modal-box { width: min(900px, 94vw); max-height: 86vh; overflow: auto; background: #fff; border-radius: 10px; padding: 16px; margin: auto; box-sizing: border-box; }
 .tray-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
 .tray-picker-item { border: 1px solid #d7dbe2; border-radius: 8px; padding: 10px; cursor: pointer; background: #fff; }
 .tray-picker-item.active { border-color: #0d6efd; background: #eaf3ff; }
@@ -174,6 +175,15 @@ button:hover { background: #218838; }
         left: 8px;
         top: 78px;
         width: auto;
+    }
+    .modal-mask {
+        align-items: flex-start;
+        padding: 10px 8px;
+    }
+    .modal-box {
+        width: min(100%, 100%);
+        max-height: calc(100dvh - 20px);
+        border-radius: 12px;
     }
 }
 .shipment-pick-grid { max-height: 360px; overflow:auto; border:1px solid #e5e7eb; border-radius:8px; padding:8px; background:#fafafa; display:flex; flex-wrap:wrap; gap:8px; align-content:flex-start; }

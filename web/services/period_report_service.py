@@ -17,6 +17,7 @@ from web.models import (
     InventoryProduct,
 )
 from web.data_store import get_log_stock_total, get_product_stats, get_flow_data
+from web.services.ops_upgrade_service import build_period_review
 
 WEEKLY_REPORTS_KEY = "period_reports_weekly_v1"
 MONTHLY_REPORTS_KEY = "period_reports_monthly_v1"
@@ -157,12 +158,26 @@ def _build_range_report(start_day: date, end_day: date, period_type: str, period
         },
         "inventory_snapshot": _snapshot_now(),
     }
+    previous = get_report(period_type, _previous_period_key(period_type, period_key))
+    report["period_review"] = build_period_review(report, previous_report=previous, lang="zh")
     return report
 
 
+def _previous_period_key(period_type: str, period_key: str) -> str:
+    text = str(period_key or "").strip()
+    if str(period_type or "").strip() == "weekly":
+        start, _ = _week_range_from_key(text)
+        prev_day = start - timedelta(days=1)
+        return _period_key_week(prev_day)
+    first_day, _ = _month_range_from_key(text)
+    prev_last = first_day - timedelta(days=1)
+    return _period_key_month(prev_last)
+
+
 def _period_key_week(day: date) -> str:
-    y, w, _ = day.isocalendar()
-    return f"{int(y)}-W{int(w):02d}"
+    start = day - timedelta(days=day.weekday())
+    end = start + timedelta(days=6)
+    return f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}"
 
 
 def _period_key_month(day: date) -> str:
@@ -223,14 +238,24 @@ def get_report(period: str, key: str | None = None) -> dict | None:
 
 def _week_range_from_key(key: str) -> tuple[date, date]:
     text = str(key or "").strip()
+    if "~" in text:
+        start_s, end_s = text.split("~", 1)
+        start = datetime.strptime(start_s, "%Y-%m-%d").date()
+        end = datetime.strptime(end_s, "%Y-%m-%d").date()
+        return start, end
+    if "_" in text:
+        start_s, end_s = text.split("_", 1)
+        start = datetime.strptime(start_s, "%Y%m%d").date()
+        end = datetime.strptime(end_s, "%Y%m%d").date()
+        return start, end
     m = text.split("-W")
     if len(m) != 2:
         raise ValueError("invalid weekly key")
     year = int(m[0])
     week = int(m[1])
     monday = date.fromisocalendar(year, week, 1)
-    saturday = monday + timedelta(days=5)
-    return monday, saturday
+    sunday = monday + timedelta(days=6)
+    return monday, sunday
 
 
 def _month_range_from_key(key: str) -> tuple[date, date]:
@@ -266,22 +291,22 @@ def ensure_period_reports_generated(now: datetime | None = None) -> dict:
     today = cur.date()
     hour = int(cur.hour)
 
-    # weekly: every Saturday 20:00 generate current ISO week report
+    # weekly: every Sunday 20:00 generate current natural week report (Mon-Sun)
     monday = today - timedelta(days=today.weekday())
-    saturday = monday + timedelta(days=5)
-    if today > saturday or (today == saturday and hour >= 20):
-        wk_key = _period_key_week(saturday)
+    sunday = monday + timedelta(days=6)
+    if today > sunday or (today == sunday and hour >= 20):
+        wk_key = _period_key_week(sunday)
         exists = get_report("weekly", wk_key)
         if not exists:
-            rep = _build_range_report(monday, saturday, "weekly", wk_key)
+            rep = _build_range_report(monday, sunday, "weekly", wk_key)
             _upsert_report(WEEKLY_REPORTS_KEY, rep)
 
     # catch-up previous week (for downtime / restart)
-    prev_saturday = saturday - timedelta(days=7)
+    prev_sunday = sunday - timedelta(days=7)
     prev_monday = monday - timedelta(days=7)
-    prev_wk_key = _period_key_week(prev_saturday)
+    prev_wk_key = _period_key_week(prev_sunday)
     if not get_report("weekly", prev_wk_key):
-        rep = _build_range_report(prev_monday, prev_saturday, "weekly", prev_wk_key)
+        rep = _build_range_report(prev_monday, prev_sunday, "weekly", prev_wk_key)
         _upsert_report(WEEKLY_REPORTS_KEY, rep)
 
     # monthly: last day of month 20:00 generate this month report

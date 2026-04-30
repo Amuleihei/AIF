@@ -29,8 +29,10 @@ from web.route_support import (
     _to_int,
 )
 from web.templates_boss import BOSS_H5_TEMPLATE
+from web.templates import AI_OVERVIEW_TEMPLATE
 from web.services.entry_reminder_service import get_daily_missing_entry_status
 from web.services.alert_center_service import get_alert_center_payload
+from web.services.ai_monitor_service import build_ai_monitor_template_text
 from web.services.factory_intelligence_service import (
     build_factory_context as _shared_build_factory_context,
     build_factory_fallback_answer as _shared_build_factory_fallback_answer,
@@ -85,6 +87,14 @@ def register_operations_routes(app, logger):
             "二选",
             "发货",
             "排班",
+            "明天",
+            "明日",
+            "预测",
+            "预判",
+            "明日风险",
+            "明天风险",
+            "tomorrow",
+            "forecast",
             "堵",
             "积压",
             "瓶颈",
@@ -215,12 +225,13 @@ def register_operations_routes(app, logger):
         return {}
 
     def _structured_ai_factory_answer(question: str, stock_data: dict, lang: str, analysis: dict) -> str:
-        context_text = _build_web_ai_context(stock_data, analysis)
+        context_text = build_ai_monitor_template_text(lang=lang, trigger="web_assistant")
         stage_names = [str(item.get("name") or "").strip() for item in (analysis.get("stage_scores") or []) if str(item.get("name") or "").strip()]
         root_guess = str(((analysis.get("root_bottleneck") or {}).get("name")) or "").strip()
         symptom_guess = str(((analysis.get("bottleneck") or {}).get("name")) or "").strip()
         prompt = (
-            "下面是 AIF 系统的实时工厂数据。你不是来复读预警，也不是只挑一条数字说事。"
+            "下面是 AIF 的全站 AI 固定输入模板（deep_monitor_v2），包含生产、HR、财务三部分关键事实。"
+            "你不是来复读预警，也不是只挑一条数字说事。"
             "你必须自己综合整条链路，判断“当前压力主要出在哪”和“当前最该优先提升的环节更像在哪”。\n\n"
             f"{context_text}\n\n"
             f"用户问题：{question}\n\n"
@@ -236,7 +247,7 @@ def register_operations_routes(app, logger):
             "要求：\n"
             "1. direct_answer 必须正面回答用户问题，不要空话。\n"
             "2. symptom_stage 和 root_stage 不能写“未知”或“视情况而定”。\n"
-            "3. evidence 必须引用实时数据里的真实数字、库存、转化比、窑状态或评分，至少 2 条。\n"
+            "3. evidence 必须引用输入模板里的真实数字、库存、转化比、窑状态或评分，至少 2 条。\n"
             "4. 不要把“预警标题”当结论。\n"
             "5. 如果压力表现在窑端，也要继续判断最该优先提升的环节是否其实在前后段。\n"
             f"6. 可参考的阶段名称：{', '.join(stage_names)}。\n"
@@ -409,6 +420,14 @@ def register_operations_routes(app, logger):
         error_flag = str(request.args.get("error", "0")).strip() in ("1", "true", "True")
         return render_template_string(HTML_TEMPLATE, result=result, error=error_flag, **stock_data)
 
+    @app.route("/ai/overview", methods=["GET"])
+    @login_required
+    def ai_overview_page():
+        if str(getattr(current_user, "role", "") or "") == "boss":
+            return redirect(url_for("boss_h5", lang=get_lang()))
+        stock_data = get_stock_data_with_lang()
+        return render_template_string(AI_OVERVIEW_TEMPLATE, **stock_data)
+
     @app.route("/boss/h5", methods=["GET"])
     @login_required
     def boss_h5():
@@ -445,11 +464,12 @@ def register_operations_routes(app, logger):
         if use_factory_context:
             stock_data = get_stock_data_with_lang()
             analysis = _build_factory_analysis(stock_data, lang)
-            context_text = _build_web_ai_context(stock_data, analysis)
+            context_text = build_ai_monitor_template_text(lang=lang, trigger="web_assistant")
             prompt = (
-                "下面是 AIF 网页中的实时经营数据，以及系统对全流程效率的先验判断。\n"
-                "预警不是依据，系统全盘判断摘要才是依据。\n"
+                "下面是 AIF 全站 AI 固定输入模板（deep_monitor_v2），以及系统对全流程效率的先验判断。\n"
+                "预警不是依据，结构化关键事实和系统全盘判断摘要才是依据。\n"
                 "这次用户问的是经营分析类问题，你必须先理解整条生产链，再回答具体问题，不能只抓某一条积压或某一个窑状态。\n"
+                "如果用户在问明天、预判、风险或下一步准备，必须优先引用 forecast_core_signals 里的预测结果、风险来源和校准信息。\n"
                 "只引用与问题直接相关的数据，不要机械复述整段数据。\n\n"
                 f"{context_text}\n\n"
                 f"用户问题：{question}\n\n"
@@ -457,15 +477,17 @@ def register_operations_routes(app, logger):
                 "1. 先直接回答用户真正的问题；"
                 "2. 至少引用 1 到 3 个和问题直接相关的实际指标、阶段评分、转化比、库存数字或窑状态；"
                 "3. 如果用户在问瓶颈、堵点、该先调哪里，必须区分“症状出在哪”和“根因卡在哪”；"
-                "4. 如果是在做经营判断，再补 3 条以内建议；"
-                "5. 如果数据不足，要直接说缺什么；"
-                "6. 不要编造不存在的数字，也不要把预警标题当成结论。"
+                "4. 如果用户在问明天、预判或风险，要明确写出明日主风险和明日动作；"
+                "5. 如果是在做经营判断，再补 3 条以内建议；"
+                "6. 如果数据不足，要直接说缺什么；"
+                "7. 不要编造不存在的数字，也不要把预警标题当成结论。"
             )
             system_prompt = (
                 "你是 AIF 网页内置 AI 助手。"
                 "你的角色不是预警播报器，而是整厂运营分析助理。"
                 "你要先看整条链路的节拍，再回答局部问题，还要区分现象和根因。"
                 "当用户问经营分析时，要优先基于系统给出的全流程判断摘要作答。"
+                "当用户问明天或预判时，要优先基于预测层回答，而不是只复述今天的状态。"
                 "当用户只是打招呼、闲聊或问普通问题时，正常自然回答，不要硬扯库存。"
                 "当问题明显是在问当前经营情况时，必须引用当前数据，不允许只给空泛套话。"
                 "回答要简洁、具体、有人味。"

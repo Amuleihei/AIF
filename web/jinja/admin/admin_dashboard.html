@@ -29,6 +29,7 @@
             <a href="{{ url_for('admin_hr_employees') }}">{{ texts.get('employee_mgmt_link', '员工管理') }}</a>
             <a href="{{ url_for('admin_users') }}">{{ texts.get('user_management', '用户管理') }}</a>
             <a href="{{ url_for('admin_audit_logs') }}">{{ texts.get('audit_logs', '审计日志') }}</a>
+            <a href="{{ url_for('admin_traceability', lang=lang) }}">{{ texts.get('traceability_title', '事件追溯') }}</a>
             <a href="{{ url_for('admin_alert_settings') }}">{{ texts.get('alert_threshold', '预警阈值') }}</a>
             <a href="{{ url_for('admin_hr_settings') }}">{{ texts.get('hr_settings_title', 'HR设置') }}</a>
         </div>
@@ -47,6 +48,7 @@
             <a class="btn" href="{{ url_for('admin_hr_employees') }}">{{ texts.get('admin_quick_hr_employees', '员工档案管理') }}</a>
             <a class="btn" href="{{ url_for('admin_users') }}">{{ texts.get('admin_quick_users_security', '用户与账号安全') }}</a>
             <a class="btn" href="{{ url_for('admin_audit_logs') }}">{{ texts.get('admin_quick_audit', '审计日志查询') }}</a>
+            <a class="btn" href="{{ url_for('admin_traceability', lang=lang) }}">{{ texts.get('traceability_title', '事件追溯') }}</a>
             <a class="btn" href="{{ url_for('admin_alert_settings') }}">{{ texts.get('admin_quick_alert_threshold', '库存预警阈值设置') }}</a>
             <a class="btn" href="{{ url_for('admin_hr_settings') }}">{{ texts.get('admin_quick_hr_settings', 'HR组织与薪资设置') }}</a>
             {% if stats.weekly_url %}

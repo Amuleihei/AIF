@@ -22,7 +22,6 @@ from web.utils import get_lang
 from web.services.daily_report_service import build_daily_report
 from web.services.daily_once_link_service import verify_daily_temp_token, issue_daily_once_token, build_daily_once_link
 from web.services.period_report_service import get_report, rebuild_period_report
-from web.services.ai_monitor_service import get_cached_deep_monitor
 from web.i18n import LANGUAGES
 from tg_bot.config import get_bot_token
 from web.models import Session, TgSetting, TgUserRole
@@ -221,6 +220,16 @@ PERIOD_REPORT_TEMPLATE = """
             <tr><th>{{ rpt_texts.count_labels.get(k, k) }}</th><td>{{ v }}</td></tr>
             {% endfor %}
         </tbody></table>
+
+        {% if report.period_review %}
+        <h3>{{ report.period_review.title }}</h3>
+        <table><tbody>
+            <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.period_review.summary }}</td></tr>
+            <tr><th>{{ texts.get('period_review_weakest_label', '最弱变化') }}</th><td>{{ report.period_review.lag_metric.label }} ({{ '%+.1f'|format(report.period_review.lag_metric.delta or 0) }})</td></tr>
+            <tr><th>{{ texts.get('period_review_best_label', '最好变化') }}</th><td>{{ report.period_review.lead_metric.label }} ({{ '%+.1f'|format(report.period_review.lead_metric.delta or 0) }})</td></tr>
+            <tr><th>{{ texts.get('forecast_actions_label', '明日动作') }}</th><td>{{ report.period_review.actions|join('；') if report.period_review.actions else '-' }}</td></tr>
+        </tbody></table>
+        {% endif %}
     </div>
 </body>
 </html>
@@ -286,18 +295,16 @@ def _tg_user_lang(session, uid: str) -> str:
     return "zh"
 
 
-def _daily_once_text_for_lang(lang: str, day: str, link: str, intelligence_brief: str = "", deep_monitor_summary: str = "") -> str:
-    brief = str(intelligence_brief or "").strip()
-    deep = str(deep_monitor_summary or "").strip()
+def _daily_once_text_for_lang(
+    lang: str,
+    day: str,
+    link: str,
+) -> str:
     if lang == "my":
         lines = [
             f"📘 {day} နေ့စဉ်အစီရင်ခံစာ (တစ်ကြိမ်သုံးလင့်ခ်)",
             "⚠️ ဤလင့်ခ်သည် တစ်ကြိမ်သာအသုံးပြုနိုင်ပြီး ဒုတိယအကြိမ်ဝင်ရန် Login လိုအပ်ပါသည်။",
         ]
-        if deep:
-            lines.append(f"🧭 {deep}")
-        if brief:
-            lines.append(f"🧠 {brief}")
         lines.append(link)
         return "\n".join(lines)
     if lang == "en":
@@ -305,20 +312,12 @@ def _daily_once_text_for_lang(lang: str, day: str, link: str, intelligence_brief
             f"📘 Daily Report {day} (One-time Link)",
             "⚠️ This link can be opened once only. Second access requires login.",
         ]
-        if deep:
-            lines.append(f"🧭 {deep}")
-        if brief:
-            lines.append(f"🧠 {brief}")
         lines.append(link)
         return "\n".join(lines)
     lines = [
         f"📘 {day} 日报（一次性链接）",
         "⚠️ 此链接为一次性链接，二次访问需登录。",
     ]
-    if deep:
-        lines.append(f"🧭 {deep}")
-    if brief:
-        lines.append(f"🧠 {brief}")
     lines.append(link)
     return "\n".join(lines)
 
@@ -406,17 +405,6 @@ def register_reporting_routes(app):
         session = Session()
         sent = 0
         try:
-            intelligence_brief = ""
-            deep_monitor_summary = ""
-            try:
-                rpt = build_daily_report(day, lang=lang)
-                intelligence_brief = str((rpt.get("factory_intelligence") or {}).get("brief") or "").strip()
-            except Exception:
-                intelligence_brief = ""
-            try:
-                deep_monitor_summary = str((get_cached_deep_monitor(lang) or {}).get("summary") or "").strip()
-            except Exception:
-                deep_monitor_summary = ""
             base_url = _daily_once_web_base_url(session)
             if not base_url:
                 return jsonify({"ok": False, "error": texts.get("web_base_url_missing", "未配置外网地址")}), 500
@@ -435,7 +423,11 @@ def register_reporting_routes(app):
                         continue
                     payload = {
                         "chat_id": str(uid),
-                        "text": _daily_once_text_for_lang(_tg_user_lang(session, str(uid)), day, link, intelligence_brief=intelligence_brief, deep_monitor_summary=deep_monitor_summary),
+                        "text": _daily_once_text_for_lang(
+                            _tg_user_lang(session, str(uid)),
+                            day,
+                            link,
+                        ),
                         "disable_web_page_preview": True,
                     }
                     req = urllib_request.Request(

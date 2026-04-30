@@ -24,6 +24,7 @@ from web.templates_admin import (
     ADMIN_USERS_TEMPLATE,
     ADMIN_DASHBOARD_TEMPLATE,
     ADMIN_AUDIT_TEMPLATE,
+    ADMIN_TRACEABILITY_TEMPLATE,
     ADMIN_ALERT_SETTINGS_TEMPLATE,
     ADMIN_ALERT_CENTER_TEMPLATE,
     ADMIN_HR_SETTINGS_TEMPLATE,
@@ -44,7 +45,14 @@ from modules.hr.hr_engine import (
     update_hr_employee_from_admin,
     update_hr_employee_status_from_admin,
 )
-from web.services.alert_settings_service import get_alert_settings, save_alert_settings
+from web.services.alert_settings_service import (
+    get_alert_settings,
+    get_ai_monitor_settings,
+    get_ai_capacity_settings,
+    save_alert_settings,
+    save_ai_monitor_settings,
+    save_ai_capacity_settings,
+)
 from web.services.alert_center_service import (
     append_threshold_version,
     get_alert_center_payload,
@@ -52,10 +60,12 @@ from web.services.alert_center_service import (
     set_alert_silence,
     update_alert_event,
 )
-from web.services.ai_monitor_service import get_cached_deep_monitor
+from web.services.ai_monitor_service import get_ai_monitor_runtime_status, get_cached_deep_monitor, queue_deep_monitor
 from web.services.finance_service import get_finance_dashboard_payload, apply_finance_form, post_payroll_to_finance
 from web.services.period_report_service import get_period_report_links
 from web.services.tg_login_token_service import verify_tg_login_token
+from web.services.traceability_service import build_traceability_lookup, build_traceability_snapshot
+from web.utils import get_stock_data
 
 logger = logging.getLogger("aif.web")
 
@@ -85,6 +95,25 @@ def _build_hr_ai_insight(payload: dict, lang: str = "zh") -> dict:
     gap_ratio = (gap_count / active_total) if active_total > 0 else 0.0
     leave_total = absent_count + leave_count + sick_count + rest_count
     leave_ratio = (leave_total / active_total) if active_total > 0 else 0.0
+    stock = get_stock_data(lang=lang)
+    center_payload = get_alert_center_payload(limit_recent=10, lang=lang)
+    throughput_day = (center_payload.get("throughput", {}) or {}).get("current_day", {}) if isinstance(center_payload, dict) else {}
+    team_live_stats = payload.get("team_live_stats", {}) if isinstance(payload.get("team_live_stats"), dict) else {}
+    saw_operation_stats = payload.get("saw_operation_stats", {}) if isinstance(payload.get("saw_operation_stats"), dict) else {}
+    sorting_team = team_live_stats.get("sorting", {}) if isinstance(team_live_stats.get("sorting"), dict) else {}
+    saw_running = int(saw_operation_stats.get("running_machine_count", 0) or 0)
+    saw_configured = int(saw_operation_stats.get("configured_machine_count", 0) or 0)
+    saw_reason = str(saw_operation_stats.get("likely_reason", "") or "").strip()
+    sorting_stock = int(stock.get("sorting_stock", 0) or 0)
+    kiln_done_stock = int(stock.get("kiln_done_stock", 0) or 0)
+    log_stock = float(stock.get("log_stock", 0) or 0)
+    capacity_cfg = get_ai_capacity_settings()
+    saw_daily_target_total = int(capacity_cfg.get("band_saw_machine_count", 6) or 0) * int(capacity_cfg.get("band_saw_daily_target_trays_per_machine", 4) or 0)
+    secondary_daily_target = int(capacity_cfg.get("secondary_daily_finish_target_pcs", 15) or 0)
+    secondary_operator_target = int(capacity_cfg.get("secondary_saw_operator_target", 3) or 0)
+    sorting_on_duty = int(sorting_team.get("on_duty", 0) or 0)
+    saw_actual = int(throughput_day.get("saw_output_trays", 0) or 0)
+    finished_actual = int(throughput_day.get("product_count", throughput_day.get("finished_pcs", 0)) or 0)
 
     if lang == "en":
         summary = f"{present_count}/{active_total} active staff are available today."
@@ -164,6 +193,43 @@ def _build_hr_ai_insight(payload: dict, lang: str = "zh") -> dict:
             summary += " 人事侧应先确认请假与缺勤是否已经完成替补。"
         risks = []
         actions = []
+        if saw_configured > 0 and saw_running < saw_configured:
+            if saw_reason in ("staff_shortage", "attendance_gap"):
+                risks.append(f"今日开锯 {saw_running}/{saw_configured} 台，更像锯工人手不足，不是单纯机器没开。")
+                actions.append("先确认锯工组、副锯工和叉车/上料支援是否到位，再判断是否需要调整前段计划。")
+            elif log_stock <= 20:
+                risks.append(f"今日开锯 {saw_running}/{saw_configured} 台，同时原木库存只有 {log_stock:.1f} MT，更像前段缺料。")
+                actions.append("先查原木到料、备料和上料节拍，不要只从人手角度看开锯不足。")
+            else:
+                risks.append(f"今日开锯只有 {saw_running}/{saw_configured} 台，人事需要联动现场确认是调度压缩还是供料衔接不足。")
+                actions.append("先问清楚哪些锯是主动停开、哪些是被动停开，再决定补人还是调工序。")
+        if saw_daily_target_total > 0 and saw_actual < saw_daily_target_total:
+            diff = saw_daily_target_total - saw_actual
+            if saw_reason in ("staff_shortage", "attendance_gap"):
+                risks.append(f"锯解今日目标 {saw_daily_target_total} 托，当前仅完成 {saw_actual} 托，差 {diff} 托，更像人手与开锯台数没有顶上。")
+                actions.append("先保主锯、副锯、锯QC到位，再看是否需要压缩非关键岗位，优先把开锯台数拉回目标。")
+            elif log_stock <= 20:
+                risks.append(f"锯解今日目标 {saw_daily_target_total} 托，当前差 {diff} 托，同时原木偏低，更像原料约束。")
+                actions.append("人事不要只盯补人，要同步催原木到料和上料节拍，避免补了人却没料可切。")
+        if kiln_done_stock >= 8:
+            sorting_unavailable = int(sorting_team.get("unavailable", 0) or 0)
+            if sorting_on_duty <= max(1, int(sorting_team.get("total", 0) or 0) // 3) or sorting_unavailable >= 2:
+                risks.append(f"待二选 {kiln_done_stock} 托偏高，拣选组在岗 {sorting_on_duty} 人，人事侧要先排查二选人手是否不足。")
+                actions.append("优先补拣选/二选班组，必要时从相邻岗位短时支援，先把出窑后的承接提起来。")
+            else:
+                risks.append(f"待二选 {kiln_done_stock} 托偏高，但拣选组并非明显缺人，更像工具、锯台或流程承接问题。")
+                actions.append("别只盯加人，先联动现场确认二选锯台、返修位和成品推进是否顺。")
+        if secondary_daily_target > 0 and finished_actual < secondary_daily_target:
+            diff = secondary_daily_target - finished_actual
+            if sorting_on_duty < secondary_operator_target:
+                risks.append(f"二选日产目标 {secondary_daily_target} 件，当前仅完成 {finished_actual} 件，差 {diff} 件，更像二选人手不足。")
+                actions.append("先把台锯工与二选人员补到目标，再决定是否加设备。")
+            else:
+                risks.append(f"二选日产目标 {secondary_daily_target} 件，当前差 {diff} 件；若积压持续偏高，应提醒现场评估是否增加二选设备。")
+                actions.append("在人手已基本够用的前提下，联动现场评估增加二选锯台或优化台锯利用率。")
+        if sorting_stock <= 4 and saw_configured > 0 and saw_running < saw_configured and saw_reason in ("staff_shortage", "attendance_gap"):
+            risks.append(f"待入窑只有 {sorting_stock} 托，同时开锯不足，人事应把前段补位放在优先级更前。")
+            actions.append("优先稳住锯工、药浸和入窑衔接岗位，再看是否需要把人从后段临时前移。")
         if gap_team and gap_ratio >= 0.15:
             risks.append(f"「{gap_team}」今日缺口 {gap_count} 人，可能直接影响交接节拍或产出。")
             actions.append(f"优先给「{gap_team}」补人，必要时从相邻班组临时支援。")
@@ -202,10 +268,18 @@ def _build_hr_ai_insight(payload: dict, lang: str = "zh") -> dict:
 
 
 def _build_role_support_insight(factory_intelligence: dict, role_key: str, lang: str = "zh") -> dict:
-    root = (factory_intelligence or {}).get("root_bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    root = (
+        (factory_intelligence or {}).get("priority_stage", {})
+        if isinstance(factory_intelligence, dict) and isinstance((factory_intelligence or {}).get("priority_stage"), dict)
+        else (factory_intelligence or {}).get("root_bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    )
     root_name = str(root.get("name") or "").strip()
     root_reason = str(root.get("reason") or "").strip()
-    symptom = (factory_intelligence or {}).get("bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    symptom = (
+        (factory_intelligence or {}).get("pressure_stage", {})
+        if isinstance(factory_intelligence, dict) and isinstance((factory_intelligence or {}).get("pressure_stage"), dict)
+        else (factory_intelligence or {}).get("bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    )
     symptom_name = str(symptom.get("name") or "").strip()
     role = str(role_key or "").strip().lower()
 
@@ -792,6 +866,29 @@ def register_auth_admin_routes(app, translate):
             current_user=current_user,
         )
 
+    @app.route("/admin/trace")
+    @login_required
+    def admin_traceability():
+        if not current_user.has_permission("admin"):
+            flash(translate("no_admin_perm"), "error")
+            return redirect(url_for("index"))
+
+        lang = get_lang()
+        texts = LANGUAGES[lang]
+        keyword = (request.args.get("q") or "").strip()
+        action = (request.args.get("action") or "").strip()
+        day = (request.args.get("date") or "").strip()
+        result = build_traceability_lookup(keyword=keyword, action=action, day=day, lang=lang, limit=160)
+        snapshot = build_traceability_snapshot(lang=lang, day_text=day or None, limit=12)
+        return render_template_string(
+            ADMIN_TRACEABILITY_TEMPLATE,
+            lang=lang,
+            texts=texts,
+            result=result,
+            snapshot=snapshot,
+            current_user=current_user,
+        )
+
     @app.route("/admin")
     @login_required
     def admin_root():
@@ -831,8 +928,23 @@ def register_auth_admin_routes(app, translate):
             flash(translate("no_admin_perm"), "error")
             return redirect(url_for("index"))
 
+        lang = get_lang()
         result_msg, error_msg = _pull_page_messages()
         if request.method == "POST":
+            form_type = str(request.form.get("form_type", "") or "").strip()
+            if form_type == "manual_ai_monitor":
+                queued = queue_deep_monitor(trigger="manual-admin", lang=lang, force=True)
+                if queued:
+                    _audit(
+                        "manual_ai_monitor",
+                        target="ai_monitor",
+                        detail="trigger=manual-admin",
+                    )
+                    flash("✅ 已手动触发一轮AI深巡检", "success")
+                else:
+                    flash("ℹ️ 当前已有巡检在运行，或系统刚触发过一轮，请稍后再试", "info")
+                return _redirect_with_lang("admin_alert_settings")
+
             payload = {
                 "log_stock_mt_min": request.form.get("log_stock_mt_min"),
                 "sorting_stock_tray_min": request.form.get("sorting_stock_tray_min"),
@@ -840,7 +952,26 @@ def register_auth_admin_routes(app, translate):
                 "product_shippable_tray_min": request.form.get("product_shippable_tray_min"),
                 "kiln_max_trays": request.form.get("kiln_max_trays"),
             }
+            ai_monitor_payload = {
+                "active_start": request.form.get("ai_monitor_active_start"),
+                "active_end": request.form.get("ai_monitor_active_end"),
+                "idle_monitor_hours": request.form.get("ai_monitor_idle_hours"),
+                "db_change_settle_minutes": request.form.get("ai_monitor_db_settle_minutes"),
+                "deep_monitor_min_gap_minutes": request.form.get("ai_monitor_min_gap_minutes"),
+            }
+            ai_capacity_payload = {
+                "band_saw_machine_count": request.form.get("band_saw_machine_count"),
+                "band_saw_primary_target": request.form.get("band_saw_primary_target"),
+                "band_saw_assistant_target": request.form.get("band_saw_assistant_target"),
+                "band_saw_qc_target": request.form.get("band_saw_qc_target"),
+                "band_saw_daily_target_trays_per_machine": request.form.get("band_saw_daily_target_trays_per_machine"),
+                "secondary_saw_machine_count": request.form.get("secondary_saw_machine_count"),
+                "secondary_saw_operator_target": request.form.get("secondary_saw_operator_target"),
+                "secondary_daily_finish_target_pcs": request.form.get("secondary_daily_finish_target_pcs"),
+            }
             saved = save_alert_settings(payload)
+            ai_saved = save_ai_monitor_settings(ai_monitor_payload)
+            ai_capacity_saved = save_ai_capacity_settings(ai_capacity_payload)
             append_threshold_version(saved, operator=str(getattr(current_user, "username", "") or ""))
             _audit(
                 "update_alert_thresholds",
@@ -850,16 +981,31 @@ def register_auth_admin_routes(app, translate):
                     f"sorting_min={saved.get('sorting_stock_tray_min')},"
                     f"kiln_done_max={saved.get('kiln_done_stock_tray_max')},"
                     f"product_shippable_tray_min={saved.get('product_shippable_tray_min')},"
-                    f"kiln_max_trays={saved.get('kiln_max_trays')}"
+                    f"kiln_max_trays={saved.get('kiln_max_trays')},"
+                    f"monitor_window={ai_saved.get('active_start')}-{ai_saved.get('active_end')},"
+                    f"idle_hours={ai_saved.get('idle_monitor_hours')},"
+                    f"settle_min={ai_saved.get('db_change_settle_minutes')},"
+                    f"monitor_gap_min={ai_saved.get('deep_monitor_min_gap_minutes')},"
+                    f"band_saw={ai_capacity_saved.get('band_saw_machine_count')},"
+                    f"secondary_saw={ai_capacity_saved.get('secondary_saw_machine_count')},"
+                    f"finish_target={ai_capacity_saved.get('secondary_daily_finish_target_pcs')}"
                 ),
             )
-            flash("✅ 预警值已保存并生效", "success")
+            flash("✅ 预警与AI巡检设置已保存并生效", "success")
             return _redirect_with_lang("admin_alert_settings")
 
         settings = get_alert_settings()
+        ai_monitor_settings = get_ai_monitor_settings()
+        ai_capacity_settings = get_ai_capacity_settings()
+        ai_monitor_runtime = get_ai_monitor_runtime_status()
         return render_template_string(
             ADMIN_ALERT_SETTINGS_TEMPLATE,
             settings=settings,
+            ai_monitor_settings=ai_monitor_settings,
+            ai_capacity_settings=ai_capacity_settings,
+            ai_monitor_runtime=ai_monitor_runtime,
+            lang=lang,
+            texts=LANGUAGES.get(lang, LANGUAGES["zh"]),
             result_msg=result_msg or error_msg,
         )
 

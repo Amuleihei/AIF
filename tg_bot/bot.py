@@ -61,7 +61,6 @@ from web.models import Session, TgSetting, TgPendingUser
 from web.services.entry_reminder_service import get_daily_missing_entry_status
 from web.services.daily_once_link_service import issue_daily_once_token, build_daily_once_link
 from web.services.daily_report_service import build_daily_report
-from web.services.ai_monitor_service import get_cached_deep_monitor
 from web.services.tg_login_token_service import issue_tg_login_token, build_tg_login_link
 from modules.report.report_engine import handle_report
 from modules.report.daily_report_engine import handle_daily_report
@@ -548,19 +547,17 @@ def _workspace_login_url_for_uid(uid: str) -> str:
         return ""
 
 
-def _daily_once_text_for_uid(uid: str, day: str, link: str, intelligence_brief: str = "", deep_monitor_summary: str = "") -> str:
+def _daily_once_text_for_uid(
+    uid: str,
+    day: str,
+    link: str,
+) -> str:
     lang = get_user_lang(uid)
-    brief = str(intelligence_brief or "").strip()
-    deep = str(deep_monitor_summary or "").strip()
     if lang == "my":
         lines = [
             f"📘 {day} နေ့စဉ်အစီရင်ခံစာ (တစ်ကြိမ်သုံးလင့်ခ်)",
             "⚠️ ဤလင့်ခ်သည် တစ်ကြိမ်သာအသုံးပြုနိုင်ပြီး ဒုတိယအကြိမ်ဝင်ရန် Login လိုအပ်ပါသည်။",
         ]
-        if deep:
-            lines.append(f"🧭 {deep}")
-        if brief:
-            lines.append(f"🧠 {brief}")
         lines.append(link)
         return "\n".join(lines)
     if lang == "en":
@@ -568,20 +565,12 @@ def _daily_once_text_for_uid(uid: str, day: str, link: str, intelligence_brief: 
             f"📘 Daily Report {day} (One-time Link)",
             "⚠️ This link can be opened once only. Second access requires login.",
         ]
-        if deep:
-            lines.append(f"🧭 {deep}")
-        if brief:
-            lines.append(f"🧠 {brief}")
         lines.append(link)
         return "\n".join(lines)
     lines = [
         f"📘 {day} 日报（一次性链接）",
         "⚠️ 此链接为一次性链接，二次访问需登录。",
     ]
-    if deep:
-        lines.append(f"🧭 {deep}")
-    if brief:
-        lines.append(f"🧠 {brief}")
     lines.append(link)
     return "\n".join(lines)
 
@@ -600,18 +589,6 @@ async def scheduled_daily_once_report_link(context: ContextTypes.DEFAULT_TYPE):
             logging.warning("daily_once_report skipped: empty AIF_WEB_BASE_URL/web_base_url")
             return
 
-        intelligence_brief = ""
-        deep_monitor_summary = ""
-        try:
-            rpt = build_daily_report(day, lang="zh")
-            intelligence_brief = str((rpt.get("factory_intelligence") or {}).get("brief") or "").strip()
-        except Exception:
-            intelligence_brief = ""
-        try:
-            deep_monitor_summary = str((get_cached_deep_monitor("zh") or {}).get("summary") or "").strip()
-        except Exception:
-            deep_monitor_summary = ""
-
         sent_ok = False
         for uid in _daily_once_target_uids():
             try:
@@ -619,7 +596,14 @@ async def scheduled_daily_once_report_link(context: ContextTypes.DEFAULT_TYPE):
                 link = build_daily_once_link(base_url, token, lang=get_user_lang(uid))
                 if not link:
                     continue
-                await context.bot.send_message(chat_id=str(uid), text=_daily_once_text_for_uid(str(uid), day, link, intelligence_brief=intelligence_brief, deep_monitor_summary=deep_monitor_summary))
+                await context.bot.send_message(
+                    chat_id=str(uid),
+                    text=_daily_once_text_for_uid(
+                        str(uid),
+                        day,
+                        link,
+                    ),
+                )
                 sent_ok = True
             except Exception:
                 logging.exception(f"daily_once_report send failed: {uid}")

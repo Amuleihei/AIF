@@ -8,7 +8,9 @@ from .data_store import get_log_stock_total, get_product_stats, get_flow_data, g
 from .models import Session, User, TgSetting
 from .services.alert_settings_service import get_alert_settings
 from .services.alert_center_service import evaluate_inventory_alerts, get_alert_center_payload
+from .services.ops_upgrade_service import build_equipment_quality_snapshot, build_role_collaboration_plan
 from .services.period_report_service import ensure_period_reports_generated, get_period_report_links
+from .services.traceability_service import build_traceability_snapshot
 from .observability import count_recent_web_errors
 
 BARK_PRICE_PER_M3_KS = 31765.0
@@ -114,7 +116,7 @@ def get_stock_data_with_lang():
         lang = 'zh'
     return get_stock_data(lang)
 
-def get_stock_data(lang='zh'):
+def get_stock_data(lang='zh', include_forecast: bool = True):
     """获取库存数据"""
     # 自动生成周报/月报（到点后首次访问触发）
     try:
@@ -314,8 +316,9 @@ def get_stock_data(lang='zh'):
     if kilns_changed:
         save_kilns_data(kilns)
 
+    alert_payload = {}
     try:
-        alert_payload = get_alert_center_payload(limit_recent=20, lang=lang)
+        alert_payload = get_alert_center_payload(limit_recent=20, lang=lang, include_forecast=include_forecast)
         efficiency = alert_payload.get("efficiency", {}) if isinstance(alert_payload, dict) else {}
         factory_intelligence = alert_payload.get("factory_intelligence", {}) if isinstance(alert_payload, dict) else {}
         radar = efficiency.get("radar", {}) if isinstance(efficiency, dict) else {}
@@ -342,10 +345,73 @@ def get_stock_data(lang='zh'):
         pass
 
     try:
-        from web.services.ai_monitor_service import get_cached_deep_monitor
+        from web.services.ai_monitor_service import get_cached_deep_monitor, get_ai_monitor_runtime_status
         ai_deep_monitor = get_cached_deep_monitor(lang)
+        ai_monitor_runtime = get_ai_monitor_runtime_status()
     except Exception:
         ai_deep_monitor = {}
+        ai_monitor_runtime = {}
+
+    if isinstance(ai_deep_monitor, dict) and ai_deep_monitor:
+        runtime_last_generated = str((ai_monitor_runtime or {}).get("last_generated_at") or "").strip()
+        runtime_last_success = str((ai_monitor_runtime or {}).get("last_success_at") or "").strip()
+        answer_generated = str(ai_deep_monitor.get("generated_at") or "").strip()
+        ai_deep_monitor = dict(ai_deep_monitor)
+        ai_deep_monitor["is_stale"] = bool(runtime_last_generated and runtime_last_success and runtime_last_generated != runtime_last_success)
+        ai_deep_monitor["runtime_last_generated_at"] = runtime_last_generated
+        ai_deep_monitor["runtime_last_success_at"] = runtime_last_success
+        ai_deep_monitor["using_cached_success"] = bool(answer_generated and runtime_last_success and answer_generated == runtime_last_success and runtime_last_generated != runtime_last_success)
+
+    try:
+        traceability_snapshot = build_traceability_snapshot(lang=lang, limit=8)
+    except Exception:
+        traceability_snapshot = {}
+
+    forecast = {}
+    if include_forecast:
+        try:
+            from .services.forecast_service import build_forecast_payload
+            forecast = build_forecast_payload(lang=lang, stock={
+                'log_stock': log_stock,
+                'saw_stock': saw_stock,
+                'dip_stock': dip_stock,
+                'sorting_stock': sorting_stock,
+                'kiln_done_stock': kiln_done_stock,
+                'product_count': product_count,
+                'product_m3': product_m3,
+            }, intelligence=factory_intelligence)
+        except Exception:
+            forecast = {}
+
+    equipment_quality = {}
+    try:
+        equipment_quality = build_equipment_quality_snapshot(
+            lang=lang,
+            stock={
+                'log_stock': log_stock,
+                'saw_stock': saw_stock,
+                'dip_stock': dip_stock,
+                'sorting_stock': sorting_stock,
+                'kiln_done_stock': kiln_done_stock,
+                'product_count': product_count,
+                'product_m3': product_m3,
+            },
+            factory_intelligence=factory_intelligence,
+            throughput_day=((alert_payload.get('throughput') or {}) if isinstance(alert_payload, dict) else {}).get('current_day', {}),
+        )
+    except Exception:
+        equipment_quality = {}
+
+    role_collaboration = {}
+    try:
+        role_collaboration = build_role_collaboration_plan(
+            lang=lang,
+            factory_intelligence=factory_intelligence,
+            equipment_quality=equipment_quality,
+            forecast=forecast,
+        )
+    except Exception:
+        role_collaboration = {}
 
     stock_payload = {
         'log_stock': log_stock,
@@ -366,6 +432,11 @@ def get_stock_data(lang='zh'):
         'overview_radar': overview_radar,
         'factory_intelligence': factory_intelligence,
         'ai_deep_monitor': ai_deep_monitor,
+        'ai_monitor_runtime': ai_monitor_runtime,
+        'traceability_snapshot': traceability_snapshot,
+        'forecast': forecast,
+        'equipment_quality': equipment_quality,
+        'role_collaboration': role_collaboration,
         'kiln_status': kiln_status,
         'system_health': get_system_health_snapshot(),
         'lang': lang,

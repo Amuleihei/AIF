@@ -64,6 +64,7 @@ from web.route_support import (
 )
 from io import BytesIO
 from web.services.alert_settings_service import get_alert_settings
+from web.services.finance_service import post_raw_log_entry_to_finance
 
 LOG_PRICE_RULE_DEFS = [
     {"key": "15_17", "label": "15-17", "min": 15.0, "max": 17.0, "is_max_open": 0, "default_price": 90000.0},
@@ -258,7 +259,17 @@ def _parse_secondary_sort_input(raw: str):
     return id_set, total
 
 
-def _calc_saw_log_mt(size_mm: int, length_ft: int, quantity: int) -> float:
+ALLOWED_LOG_LENGTHS = (3.0, 3.7, 4.0)
+
+
+def _normalize_log_length(value, default: float = 3.0) -> float:
+    length_ft = round(_to_float(value, default), 1)
+    if length_ft in ALLOWED_LOG_LENGTHS:
+        return length_ft
+    return float(default)
+
+
+def _calc_saw_log_mt(size_mm: int, length_ft: float, quantity: int) -> float:
     if size_mm <= 0 or quantity <= 0 or length_ft <= 0:
         return 0.0
     return float(size_mm) * float(size_mm) * float(length_ft) * float(quantity) / 115200.0
@@ -286,9 +297,9 @@ def _normalize_saw_machine_payload(raw_payload):
             if not isinstance(detail, dict):
                 continue
             size_mm = _to_int(detail.get("size_mm"), 0)
-            length_ft = _to_int(detail.get("length_ft"), 3)
+            length_ft = _normalize_log_length(detail.get("length_ft"), 3.0)
             quantity = _to_int(detail.get("quantity"), 0)
-            if size_mm <= 0 or quantity <= 0 or length_ft not in (3, 4):
+            if size_mm <= 0 or quantity <= 0 or length_ft not in ALLOWED_LOG_LENGTHS:
                 continue
             log_details.append(
                 {
@@ -330,9 +341,9 @@ def _normalize_log_entry_details(raw_payload):
         if not isinstance(item, dict):
             continue
         size_mm = _to_int(item.get("size_mm"), 0)
-        length_ft = _to_int(item.get("length_ft"), 3)
+        length_ft = _normalize_log_length(item.get("length_ft"), 3.0)
         quantity = _to_int(item.get("quantity"), 0)
-        if size_mm <= 0 or quantity <= 0 or length_ft not in (3, 4):
+        if size_mm <= 0 or quantity <= 0 or length_ft not in ALLOWED_LOG_LENGTHS:
             continue
         details.append(
             {
@@ -588,6 +599,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_log_entry():
         try:
+            if not _can_edit_stage_data():
+                return _redirect_index_result(f"❌ {_t('no_permission')}", error=True)
             truck_number = request.form.get("truck_number", "").strip()
             driver_name = request.form.get("driver_name", "").strip()
             log_amount = _to_float(request.form.get("log_amount", 0), 0.0)
@@ -649,10 +662,11 @@ def register_production_kiln_routes(app, logger=None):
             )
             session.add(log_entry)
             session.flush()
+            log_entry_id = int(log_entry.id)
             if size_range or price_per_mt > 0:
                 session.add(
                     LogEntryMeta(
-                        log_entry_id=int(log_entry.id),
+                        log_entry_id=log_entry_id,
                         size_range=size_range,
                         price_per_mt=round(price_per_mt, 4),
                         created_by=current_user.username,
@@ -661,9 +675,9 @@ def register_production_kiln_routes(app, logger=None):
             for detail in log_details:
                 session.add(
                     LogEntryDetail(
-                        log_entry_id=int(log_entry.id),
+                        log_entry_id=log_entry_id,
                         size_mm=_to_int(detail.get("size_mm"), 0),
-                        length_ft=_to_int(detail.get("length_ft"), 3),
+                        length_ft=_normalize_log_length(detail.get("length_ft"), 3.0),
                         quantity=_to_int(detail.get("quantity"), 0),
                         consumed_mt=round(_to_float(detail.get("consumed_mt"), 0.0), 4),
                         created_by=current_user.username,
@@ -673,7 +687,7 @@ def register_production_kiln_routes(app, logger=None):
             for row in settlement_rows:
                 session.add(
                     LogEntrySettlement(
-                        log_entry_id=int(log_entry.id),
+                        log_entry_id=log_entry_id,
                         driver_name=driver_name,
                         truck_number=truck_number,
                         rule_key=str(row.get("rule_key", "") or ""),
@@ -694,13 +708,22 @@ def register_production_kiln_routes(app, logger=None):
             session.commit()
             session.close()
             sync_raw_inventory(log_amount)
+            finance_ok, finance_msg = post_raw_log_entry_to_finance(
+                log_entry_id=log_entry_id,
+                truck_number=truck_number,
+                driver_name=driver_name,
+                log_amount=log_amount,
+                total_amount_ks=total_amount_ks,
+                operator=str(getattr(current_user, "username", "") or ""),
+            )
             audit_admin_action(
                 "submit_log_entry",
                 target=f"log_entry:{truck_number}",
                 detail=(
                     f"driver={driver_name},mt={log_amount:.4f},"
                     f"details={len(log_details)},settlements={len(settlement_rows)},"
-                    f"amount_ks={total_amount_ks:.2f},unmatched_mt={unmatched_mt:.4f}"
+                    f"amount_ks={total_amount_ks:.2f},unmatched_mt={unmatched_mt:.4f},"
+                    f"finance={'ok' if finance_ok else 'skip'}"
                 ),
             )
 
@@ -715,6 +738,8 @@ def register_production_kiln_routes(app, logger=None):
                     extra = f"，计价合计 {total_amount_ks:.2f}Ks"
                 if unmatched_mt > 0:
                     extra += f"，未匹配区间 {unmatched_mt:.4f}MT"
+                if finance_msg:
+                    extra += f"，{finance_msg.lstrip('✅⚠️❌ ').strip()}"
                 result = f"原木入库成功：车牌{truck_number}, 司机{driver_name}, {log_amount:.4f}MT{extra}"
             return _redirect_index_result(result, error=False)
         except Exception as e:
@@ -902,7 +927,7 @@ def register_production_kiln_routes(app, logger=None):
                             "司机": str(e.driver_name or ""),
                             "车号": str(e.truck_number or ""),
                             "尺寸": _to_int(d.size_mm, 0),
-                            "长度": _to_int(d.length_ft, 0),
+                            "长度": _normalize_log_length(d.length_ft, 0.0),
                             "数量": qty,
                             "MT": d_mt,
                         }
@@ -953,6 +978,8 @@ def register_production_kiln_routes(app, logger=None):
     @login_required
     def submit_saw():
         try:
+            if not _can_edit_stage_data():
+                return _redirect_index_result(f"❌ {_t('no_permission')}", error=True)
             if _is_duplicate_stage_submit_request("submit_saw", request.form, window_sec=8):
                 return _redirect_index_result(f"⚠️ {_t('duplicate_stage_submit_blocked')}", error=False)
             saw_machine_records = []
@@ -1022,7 +1049,7 @@ def register_production_kiln_routes(app, logger=None):
                                 saw_record_id=saw_record_id,
                                 machine_no=_to_int(machine.get("machine_no"), 0),
                                 size_mm=_to_int(detail.get("size_mm"), 0),
-                                length_ft=_to_int(detail.get("length_ft"), 3),
+                                length_ft=_normalize_log_length(detail.get("length_ft"), 3.0),
                                 quantity=_to_int(detail.get("quantity"), 0),
                                 consumed_mt=_to_float(detail.get("consumed_mt"), 0.0),
                                 created_by=current_user.username,
@@ -2106,3 +2133,6 @@ def register_production_kiln_routes(app, logger=None):
         _save_flow_data(flow)
 
         return jsonify({"success": True, "total_trays": len(merged_list), "added": len(normalized)})
+def _can_edit_stage_data() -> bool:
+    role = str(getattr(current_user, "role", "") or "").strip().lower()
+    return bool(current_user.has_permission("admin") or current_user.has_permission("edit") or role in {"finance", "stats", "statistics", "统计"})

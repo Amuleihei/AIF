@@ -97,7 +97,7 @@
         <div class="card" style="border-color:#cbd5e1; background:linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);">
             <div class="row" style="justify-content:space-between;">
                 <strong>{{ texts.get('intelligence_panel_title', 'AI建议') }}</strong>
-                <div class="muted">{{ data.ai_deep_monitor.generated_at }} · {{ data.ai_deep_monitor.trigger }}</div>
+                <div class="muted">{{ data.ai_deep_monitor.generated_at }} · {{ data.ai_deep_monitor.trigger }} · {{ texts.get('ai_template_version_label', 'Template') }} {{ data.ai_deep_monitor.template_version or 'deep_monitor_v2' }}</div>
             </div>
             <div style="margin-top:10px; color:#0f172a; line-height:1.7;">{{ data.ai_deep_monitor.summary }}</div>
             <div class="grid3" style="margin-top:10px;">
@@ -114,6 +114,84 @@
                     <div class="muted">{{ data.ai_deep_monitor.actions[0] if data.ai_deep_monitor.actions else '-' }}</div>
                 </div>
             </div>
+        </div>
+        {% endif %}
+
+        {% if data.forecast and data.forecast.summary %}
+        <div class="card" style="border-color:#bfdbfe; background:linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);">
+            <div class="row" style="justify-content:space-between;">
+                <strong>{{ texts.get('forecast_title', '预测层') }}</strong>
+                <div class="muted">{{ data.forecast.generated_at }} · {{ data.forecast.template_version or 'forecast_v1' }}</div>
+            </div>
+            <div style="margin-top:10px; color:#0f172a; line-height:1.7;">{{ data.forecast.summary }}</div>
+            <div class="grid3" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_tomorrow_saw_label', '明日锯解预测') }}</div>
+                    <div class="v">{{ data.forecast.predictions.tomorrow_saw_trays }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_tomorrow_finish_label', '明日成品件数预测') }}</div>
+                    <div class="v">{{ data.forecast.predictions.tomorrow_finished_pcs }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_top_risk_label', '明日主风险') }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ data.forecast.top_risk }}</div>
+                </div>
+            </div>
+            <div class="grid3" style="margin-top:10px;">
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_actions_label', '明日动作') }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ data.forecast.actions[0] if data.forecast.actions else '-' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_risk_drivers_label', '风险来源') }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ data.forecast.risk_drivers[0] if data.forecast.risk_drivers else '-' }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ data.forecast.risk_drivers[1] if data.forecast.risk_drivers|length > 1 else '' }}</div>
+                </div>
+                <div class="metric">
+                    <div class="k">{{ texts.get('forecast_calibration_label', '预测校准') }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ texts.get('forecast_hit_rate_label', '命中率') }} {{ data.forecast.calibration.hit_rate if data.forecast.calibration.hit_rate is not none else '-' }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ texts.get('forecast_avg_error_label', '平均绝对误差') }} {{ data.forecast.calibration.avg_abs_error if data.forecast.calibration.avg_abs_error is not none else '-' }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if data.traceability_links or (data.traceability and data.traceability.events) %}
+        <div class="card" style="border-color:#d8e7f8; background:linear-gradient(180deg, #f9fcff 0%, #ffffff 100%);">
+            <div class="row" style="justify-content:space-between;">
+                <strong>{{ texts.get('traceability_title', '事件追溯') }}</strong>
+                <a href="{{ url_for('admin_traceability', lang=lang) }}" class="link-inline" style="margin-left:0;">{{ texts.get('query_btn', '查询') }}</a>
+            </div>
+            {% if data.traceability_links %}
+            <div class="row" style="margin-top:10px;">
+                {% for item in data.traceability_links %}
+                <a href="{{ url_for('admin_traceability', lang=lang, q=item.q, action=item.action) }}" style="text-decoration:none; border:1px solid #dbeafe; background:#eff6ff; color:#1d4ed8; border-radius:999px; padding:5px 10px; font-size:12px;">{{ item.label }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if data.traceability and data.traceability.events %}
+            <table style="margin-top:10px;">
+                <thead>
+                    <tr>
+                        <th style="width:150px;">{{ texts.get('traceability_time', '时间') }}</th>
+                        <th style="width:120px;">{{ texts.get('traceability_stage', '环节') }}</th>
+                        <th style="width:160px;">{{ texts.get('traceability_action', '动作') }}</th>
+                        <th>{{ texts.get('traceability_target', '目标') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data.traceability.events[:5] %}
+                    <tr>
+                        <td>{{ item.created_at }}</td>
+                        <td>{{ item.stage_label }}</td>
+                        <td>{{ item.action }}</td>
+                        <td>{{ item.target or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -238,16 +316,47 @@
         <div class="card">
             <div class="row" style="justify-content:space-between;">
                 <strong>{{ texts.get('throughput_center_title', '环节产比 (m³)') }}</strong>
+                {% set tp = data.throughput_ai.calculated if data.throughput_ai and data.throughput_ai.calculated else data.throughput %}
                 <div class="muted">
                     {{ texts.get('throughput_coeff_saw_label', '锯解固定系数') }}: 0.53 m³/托 |
-                    {{ texts.get('throughput_coeff_spec_label', '规格推演系数') }}: {{ data.throughput.tray_coefficients.spec_inferred_m3_per_tray }} m³/托
-                    {% if data.throughput.tray_coefficients.spec_override_m3_per_tray > 0 %}
-                    | {{ texts.get('throughput_coeff_override_active', '手工覆盖') }}: {{ data.throughput.tray_coefficients.spec_override_m3_per_tray }} m³/托
+                    {{ texts.get('throughput_coeff_spec_label', '规格推演系数') }}: {{ tp.tray_coefficients.spec_inferred_m3_per_tray }} m³/托
+                    {% if tp.tray_coefficients.spec_override_m3_per_tray > 0 %}
+                    | {{ texts.get('throughput_coeff_override_active', '手工覆盖') }}: {{ tp.tray_coefficients.spec_override_m3_per_tray }} m³/托
                     {% endif %}
-                    | {{ texts.get('throughput_raw_mt_to_m3_label', '原木 MT→m³ 系数') }}: {{ data.throughput.tray_coefficients.raw_mt_to_m3_factor }}
-                    | {{ texts.get('throughput_kiln_shrink_label', '鲜木→干木缩水(%)') }}: {{ data.throughput.tray_coefficients.kiln_green_to_dry_shrinkage_pct }}%
+                    | {{ texts.get('throughput_raw_mt_to_m3_label', '原木 MT→m³ 系数') }}: {{ tp.tray_coefficients.raw_mt_to_m3_factor }}
+                    | {{ texts.get('throughput_kiln_shrink_label', '鲜木→干木缩水(%)') }}: {{ tp.tray_coefficients.kiln_green_to_dry_shrinkage_pct }}%
                 </div>
             </div>
+            {% if data.throughput_ai and data.throughput_ai.show_recommendation %}
+            <div class="card" style="margin-top:10px;background:#fff;">
+                <strong>{{ texts.get('intelligence_panel_title', 'AI建议') }}</strong>
+                <div class="muted" style="margin-top:6px;">{{ data.throughput_ai.generated_at }} · {{ data.throughput_ai.source }}</div>
+                <div style="margin-top:8px; color:#0f172a; line-height:1.7;">{{ data.throughput_ai.summary }}</div>
+                <div class="muted" style="margin-top:8px;">{{ data.throughput_ai.reason }}</div>
+                <div class="muted" style="margin-top:8px;">{{ data.throughput_ai.action }}</div>
+                <div class="grid3" style="margin-top:10px;">
+                    <div class="metric">
+                        <div class="k">{{ texts.get('throughput_coeff_spec_label', '规格推演系数') }}</div>
+                        <div class="muted">当前 {{ data.throughput_ai.current_coefficients.spec_tray_m3_override }} → AI建议 {{ data.throughput_ai.recommended_coefficients.spec_tray_m3_override }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="k">{{ texts.get('throughput_raw_mt_to_m3_label', '原木 MT→m³ 系数') }}</div>
+                        <div class="muted">当前 {{ data.throughput_ai.current_coefficients.raw_mt_to_m3_factor }} → AI建议 {{ data.throughput_ai.recommended_coefficients.raw_mt_to_m3_factor }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="k">{{ texts.get('throughput_kiln_shrink_label', '鲜木→干木缩水(%)') }}</div>
+                        <div class="muted">当前 {{ data.throughput_ai.current_coefficients.kiln_green_to_dry_shrinkage_pct }} → AI建议 {{ data.throughput_ai.recommended_coefficients.kiln_green_to_dry_shrinkage_pct }}</div>
+                    </div>
+                </div>
+                {% if data.metric_ai %}
+                <div class="grid3" style="margin-top:10px;">
+                    <div class="metric"><div class="muted">{{ data.metric_ai.throughput.summary }}</div></div>
+                    <div class="metric"><div class="muted">{{ data.metric_ai.yield_loss.summary }}</div></div>
+                    <div class="metric"><div class="muted">{{ data.metric_ai.trend.summary }}</div></div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
             <table style="margin-top:10px;">
                 <thead>
                     <tr>
@@ -263,48 +372,48 @@
                 <tbody>
                     <tr>
                         <td>{{ texts.get('throughput_period_day', '当日') }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_day.saw_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_day.dip_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_day.sort_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_day.secondary_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_day.product_m3) }}</td>
-                        <td class="muted">D/S {{ data.throughput.current_day.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_day.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_day.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_day.ratio_product_vs_secondary }}%</td>
+                        <td>{{ "%.3f"|format(tp.current_day.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_day.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_day.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_day.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_day.product_m3) }}</td>
+                        <td class="muted">D/S {{ tp.current_day.ratio_dip_vs_saw }}% · S/D {{ tp.current_day.ratio_sort_vs_dip }}% · 2/S {{ tp.current_day.ratio_secondary_vs_sort }}% · P/2 {{ tp.current_day.ratio_product_vs_secondary }}%</td>
                     </tr>
                     <tr>
                         <td>{{ texts.get('throughput_period_week', '当周') }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_week.saw_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_week.dip_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_week.sort_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_week.secondary_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_week.product_m3) }}</td>
-                        <td class="muted">D/S {{ data.throughput.current_week.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_week.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_week.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_week.ratio_product_vs_secondary }}%</td>
+                        <td>{{ "%.3f"|format(tp.current_week.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_week.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_week.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_week.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_week.product_m3) }}</td>
+                        <td class="muted">D/S {{ tp.current_week.ratio_dip_vs_saw }}% · S/D {{ tp.current_week.ratio_sort_vs_dip }}% · 2/S {{ tp.current_week.ratio_secondary_vs_sort }}% · P/2 {{ tp.current_week.ratio_product_vs_secondary }}%</td>
                     </tr>
                     <tr>
                         <td>{{ texts.get('throughput_period_month', '当月') }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_month.saw_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_month.dip_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_month.sort_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_month.secondary_m3) }}</td>
-                        <td>{{ "%.3f"|format(data.throughput.current_month.product_m3) }}</td>
-                        <td class="muted">D/S {{ data.throughput.current_month.ratio_dip_vs_saw }}% · S/D {{ data.throughput.current_month.ratio_sort_vs_dip }}% · 2/S {{ data.throughput.current_month.ratio_secondary_vs_sort }}% · P/2 {{ data.throughput.current_month.ratio_product_vs_secondary }}%</td>
+                        <td>{{ "%.3f"|format(tp.current_month.saw_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_month.dip_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_month.sort_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_month.secondary_m3) }}</td>
+                        <td>{{ "%.3f"|format(tp.current_month.product_m3) }}</td>
+                        <td class="muted">D/S {{ tp.current_month.ratio_dip_vs_saw }}% · S/D {{ tp.current_month.ratio_sort_vs_dip }}% · 2/S {{ tp.current_month.ratio_secondary_vs_sort }}% · P/2 {{ tp.current_month.ratio_product_vs_secondary }}%</td>
                     </tr>
                 </tbody>
             </table>
             <div class="grid3" style="margin-top:10px;">
                 <div class="metric">
                     <div class="k">{{ texts.get('throughput_period_day', '当日') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
-                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.day.product_m3) }}</div>
-                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.day.mom_pct if data.throughput.comparison.day.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.day.yoy_pct if data.throughput.comparison.day.yoy_pct is not none else '--' }}%</div>
+                    <div class="v">{{ "%.3f"|format(tp.comparison.day.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ tp.comparison.day.mom_pct if tp.comparison.day.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ tp.comparison.day.yoy_pct if tp.comparison.day.yoy_pct is not none else '--' }}%</div>
                 </div>
                 <div class="metric">
                     <div class="k">{{ texts.get('throughput_period_week', '当周') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
-                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.week.product_m3) }}</div>
-                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.week.mom_pct if data.throughput.comparison.week.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.week.yoy_pct if data.throughput.comparison.week.yoy_pct is not none else '--' }}%</div>
+                    <div class="v">{{ "%.3f"|format(tp.comparison.week.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ tp.comparison.week.mom_pct if tp.comparison.week.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ tp.comparison.week.yoy_pct if tp.comparison.week.yoy_pct is not none else '--' }}%</div>
                 </div>
                 <div class="metric">
                     <div class="k">{{ texts.get('throughput_period_month', '当月') }} {{ texts.get('throughput_stage_product', '成品') }} m³</div>
-                    <div class="v">{{ "%.3f"|format(data.throughput.comparison.month.product_m3) }}</div>
-                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ data.throughput.comparison.month.mom_pct if data.throughput.comparison.month.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ data.throughput.comparison.month.yoy_pct if data.throughput.comparison.month.yoy_pct is not none else '--' }}%</div>
+                    <div class="v">{{ "%.3f"|format(tp.comparison.month.product_m3) }}</div>
+                    <div class="muted">{{ texts.get('throughput_mom', '环比') }}: {{ tp.comparison.month.mom_pct if tp.comparison.month.mom_pct is not none else '--' }}% | {{ texts.get('throughput_yoy', '同比') }}: {{ tp.comparison.month.yoy_pct if tp.comparison.month.yoy_pct is not none else '--' }}%</div>
                 </div>
             </div>
             <div class="card" style="margin-top:10px;background:#fff;">
@@ -323,27 +432,27 @@
                     <tbody>
                         <tr>
                             <td>{{ texts.get('throughput_period_day', '当日') }}</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_day.loss_raw_to_saw_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_day.loss_kiln_in_to_out_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_day.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_day.loss_out_to_product_rate_pct }}%)</span></td>
-                            <td>{{ "%.4f"|format(data.throughput.current_day.product_m3_per_raw_mt) }} m³/MT</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_day.raw_mt_for_10_product_m3) }} MT</td>
+                            <td>{{ "%.3f"|format(tp.current_day.loss_raw_to_saw_m3) }} <span class="muted">({{ tp.current_day.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_day.loss_kiln_in_to_out_m3) }} <span class="muted">({{ tp.current_day.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_day.loss_out_to_product_m3) }} <span class="muted">({{ tp.current_day.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(tp.current_day.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(tp.current_day.raw_mt_for_10_product_m3) }} MT</td>
                         </tr>
                         <tr>
                             <td>{{ texts.get('throughput_period_week', '当周') }}</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_week.loss_raw_to_saw_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_week.loss_kiln_in_to_out_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_week.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_week.loss_out_to_product_rate_pct }}%)</span></td>
-                            <td>{{ "%.4f"|format(data.throughput.current_week.product_m3_per_raw_mt) }} m³/MT</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_week.raw_mt_for_10_product_m3) }} MT</td>
+                            <td>{{ "%.3f"|format(tp.current_week.loss_raw_to_saw_m3) }} <span class="muted">({{ tp.current_week.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_week.loss_kiln_in_to_out_m3) }} <span class="muted">({{ tp.current_week.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_week.loss_out_to_product_m3) }} <span class="muted">({{ tp.current_week.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(tp.current_week.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(tp.current_week.raw_mt_for_10_product_m3) }} MT</td>
                         </tr>
                         <tr>
                             <td>{{ texts.get('throughput_period_month', '当月') }}</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_raw_to_saw_m3) }} <span class="muted">({{ data.throughput.current_month.loss_raw_to_saw_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_kiln_in_to_out_m3) }} <span class="muted">({{ data.throughput.current_month.loss_kiln_in_to_out_rate_pct }}%)</span></td>
-                            <td>{{ "%.3f"|format(data.throughput.current_month.loss_out_to_product_m3) }} <span class="muted">({{ data.throughput.current_month.loss_out_to_product_rate_pct }}%)</span></td>
-                            <td>{{ "%.4f"|format(data.throughput.current_month.product_m3_per_raw_mt) }} m³/MT</td>
-                            <td>{{ "%.3f"|format(data.throughput.current_month.raw_mt_for_10_product_m3) }} MT</td>
+                            <td>{{ "%.3f"|format(tp.current_month.loss_raw_to_saw_m3) }} <span class="muted">({{ tp.current_month.loss_raw_to_saw_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_month.loss_kiln_in_to_out_m3) }} <span class="muted">({{ tp.current_month.loss_kiln_in_to_out_rate_pct }}%)</span></td>
+                            <td>{{ "%.3f"|format(tp.current_month.loss_out_to_product_m3) }} <span class="muted">({{ tp.current_month.loss_out_to_product_rate_pct }}%)</span></td>
+                            <td>{{ "%.4f"|format(tp.current_month.product_m3_per_raw_mt) }} m³/MT</td>
+                            <td>{{ "%.3f"|format(tp.current_month.raw_mt_for_10_product_m3) }} MT</td>
                         </tr>
                     </tbody>
                 </table>
@@ -482,7 +591,7 @@
     (function(){
       const trendCanvas = document.getElementById('throughput-trend-canvas');
       const cmpCanvas = document.getElementById('throughput-compare-canvas');
-      const trend = {{ data.throughput.trend_daily | tojson }};
+      const trend = {{ (data.throughput_ai.calculated.trend_daily if data.throughput_ai and data.throughput_ai.calculated else data.throughput.trend_daily) | tojson }};
       if(trendCanvas && trend && trend.labels){
         const ctx = trendCanvas.getContext('2d');
         const W = trendCanvas.width, H = trendCanvas.height;
@@ -526,7 +635,7 @@
       }
 
       if(cmpCanvas){
-        const cmp = {{ data.throughput.comparison | tojson }};
+      const cmp = {{ (data.throughput_ai.calculated.comparison if data.throughput_ai and data.throughput_ai.calculated else data.throughput.comparison) | tojson }};
         const ctx = cmpCanvas.getContext('2d');
         const W = cmpCanvas.width, H = cmpCanvas.height;
         const pad = {l:32,r:18,t:20,b:38};

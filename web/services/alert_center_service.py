@@ -2,9 +2,12 @@ import json
 import os
 import time
 import secrets
+import hashlib
+from bisect import bisect_right
 from datetime import datetime, timedelta
 from urllib import request as urllib_request
 
+from modules.ai.ai_engine import ask_ai
 from tg_bot.config import get_bot_token
 from web.i18n import LANGUAGES
 from web.data_store import get_flow_data, get_kilns_data, get_log_stock_total, get_product_stats, get_shipping_data
@@ -21,6 +24,7 @@ from web.models import (
     FlowSelectedTrayDetail,
 )
 from web.services.factory_intelligence_service import build_factory_intelligence
+from web.services.traceability_service import build_traceability_snapshot
 
 
 ALERT_EVENTS_KEY = "alert_engine_events_v1"
@@ -28,6 +32,82 @@ ALERT_HISTORY_KEY = "alert_engine_stock_history_v1"
 ALERT_STATE_KEY = "alert_engine_state_v1"
 ALERT_ENGINE_CFG_KEY = "alert_engine_config_v1"
 ALERT_THRESHOLD_VERSIONS_KEY = "alert_threshold_versions_v1"
+ALERT_AI_THROUGHPUT_CACHE_KEY = "alert_engine_ai_throughput_v1"
+_EFFICIENCY_MEMORY_CACHE = {"signature": "", "payload": None, "generated_ts": 0}
+ALERT_AI_CALIBRATION_ENABLED = str(os.getenv("AIF_ALERT_AI_CALIBRATION_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _period_ts_range(kind: str, now: datetime | None = None) -> tuple[int, int]:
+    dt = now or datetime.now()
+    if kind == "day":
+        start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = dt
+        return int(start.timestamp()), int(end.timestamp())
+    if kind == "week":
+        start = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = dt
+        return int(start.timestamp()), int(end.timestamp())
+    if kind == "week_prev":
+        cur_start = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        prev_start = cur_start - timedelta(days=7)
+        prev_end = prev_start + (dt - cur_start)
+        return int(prev_start.timestamp()), int(prev_end.timestamp())
+    if kind == "month":
+        start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = dt
+        return int(start.timestamp()), int(end.timestamp())
+    if kind == "month_prev":
+        cur_start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_end_anchor = cur_start - timedelta(seconds=1)
+        prev_start = prev_end_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elapsed = dt - cur_start
+        prev_end = min(prev_start + elapsed, prev_end_anchor.replace(hour=23, minute=59, second=59, microsecond=0))
+        return int(prev_start.timestamp()), int(prev_end.timestamp())
+    if kind == "year_ago_day":
+        end = dt - timedelta(days=365)
+        start = end.replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(start.timestamp()), int(end.timestamp())
+    if kind == "year_ago_week":
+        cur_start = (dt - timedelta(days=dt.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = cur_start - timedelta(days=364)
+        end = start + (dt - cur_start)
+        return int(start.timestamp()), int(end.timestamp())
+    if kind == "year_ago_month":
+        cur_start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = cur_start - timedelta(days=365)
+        end = start + (dt - cur_start)
+        return int(start.timestamp()), int(end.timestamp())
+    raise ValueError(f"unsupported period kind: {kind}")
+
+
+def _build_traceability_links(lang: str, intelligence: dict, traceability: dict) -> list[dict]:
+    links: list[dict] = []
+    pressure = ((intelligence.get("pressure_stage") or {}) if isinstance(intelligence, dict) else {}) or {}
+    priority = ((intelligence.get("priority_stage") or {}) if isinstance(intelligence, dict) else {}) or {}
+    recent_events = traceability.get("events", []) if isinstance(traceability.get("events"), list) else []
+
+    pressure_name = str(pressure.get("name") or "").strip()
+    priority_name = str(priority.get("name") or "").strip()
+    if pressure_name:
+        links.append({"label": f"反查压力环节：{pressure_name}", "q": "", "action": ""})
+    if priority_name and priority_name != pressure_name:
+        links.append({"label": f"反查优先提升环节：{priority_name}", "q": "", "action": ""})
+    for item in recent_events[:3]:
+        if not isinstance(item, dict):
+            continue
+        target = str(item.get("target") or "").strip()
+        if not target:
+            continue
+        links.append({"label": f"追最近事件：{target}", "q": target, "action": str(item.get("action") or "").strip()})
+    dedup: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in links:
+        key = (str(item.get("q") or ""), str(item.get("action") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(item)
+    return dedup[:5]
 
 
 def _to_float(v, default=0.0):
@@ -67,6 +147,36 @@ def _save_json(session, key: str, value) -> None:
         session.add(row)
     else:
         row.value = text
+
+
+def _extract_first_json_object(raw: str) -> str:
+    text = str(raw or "")
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("JSON object not found")
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+    raise ValueError("JSON object incomplete")
 
 
 def get_alert_engine_config() -> dict:
@@ -568,10 +678,6 @@ def _pct_change(cur: float, base: float):
 def _build_stage_throughput_payload(lang: str = "zh", cfg: dict | None = None) -> dict:
     lc = _norm_lang(lang)
     now = datetime.now()
-    now_ts = int(now.timestamp())
-    day_secs = 86400
-    week_secs = day_secs * 7
-    month_secs = day_secs * 30
 
     session = Session()
     try:
@@ -580,17 +686,27 @@ def _build_stage_throughput_payload(lang: str = "zh", cfg: dict | None = None) -
         tray_m3_other = override_tray_m3 if override_tray_m3 > 0 else auto_tray_m3
         raw_mt_to_m3_factor = _to_float((cfg or {}).get("raw_mt_to_m3_factor"), 1.0)
         kiln_green_to_dry_shrinkage_pct = _to_float((cfg or {}).get("kiln_green_to_dry_shrinkage_pct"), 7.5)
-        day_cur = _sum_stage_range(session, now_ts - day_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        week_cur = _sum_stage_range(session, now_ts - week_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        month_cur = _sum_stage_range(session, now_ts - month_secs, now_ts, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        day_start, day_end = _period_ts_range("day", now)
+        week_start, week_end = _period_ts_range("week", now)
+        month_start, month_end = _period_ts_range("month", now)
+        day_prev_start, day_prev_end = day_start - 86400, day_start
+        week_prev_start, week_prev_end = _period_ts_range("week_prev", now)
+        month_prev_start, month_prev_end = _period_ts_range("month_prev", now)
+        day_yoy_start, day_yoy_end = _period_ts_range("year_ago_day", now)
+        week_yoy_start, week_yoy_end = _period_ts_range("year_ago_week", now)
+        month_yoy_start, month_yoy_end = _period_ts_range("year_ago_month", now)
 
-        day_prev = _sum_stage_range(session, now_ts - 2 * day_secs, now_ts - day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        week_prev = _sum_stage_range(session, now_ts - 2 * week_secs, now_ts - week_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        month_prev = _sum_stage_range(session, now_ts - 2 * month_secs, now_ts - month_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        day_cur = _sum_stage_range(session, day_start, day_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_cur = _sum_stage_range(session, week_start, week_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_cur = _sum_stage_range(session, month_start, month_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
 
-        day_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - day_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        week_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - week_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
-        month_yoy = _sum_stage_range(session, now_ts - 365 * day_secs - month_secs, now_ts - 365 * day_secs, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        day_prev = _sum_stage_range(session, day_prev_start, day_prev_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_prev = _sum_stage_range(session, week_prev_start, week_prev_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_prev = _sum_stage_range(session, month_prev_start, month_prev_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+
+        day_yoy = _sum_stage_range(session, day_yoy_start, day_yoy_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        week_yoy = _sum_stage_range(session, week_yoy_start, week_yoy_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
+        month_yoy = _sum_stage_range(session, month_yoy_start, month_yoy_end, tray_m3_other, raw_mt_to_m3_factor, kiln_green_to_dry_shrinkage_pct)
 
         labels = []
         saw_arr = []
@@ -1151,14 +1267,14 @@ def _safe_ratio_score(a: float, b: float) -> float:
     return max(0.0, min(100.0, (lo / hi) * 100.0))
 
 
-def _front_stage_conversion_score(point: dict, history: list) -> float:
+def _front_stage_conversion_score(point: dict, history: list, history_timestamps: list[int] | None = None) -> float:
     """
     前段均衡（效率优先）：
     - 速度侧：关注 24h 内“锯解消耗”和“药浸消耗”是否同步推进。
     - 库存侧：锯解/药浸在制库存越少越好（次权重）。
     """
     ts = _to_int(point.get("ts"), int(time.time()))
-    prev = _history_point_before(history, ts - 24 * 3600)
+    prev = _history_point_before_sorted(history, history_timestamps, ts - 24 * 3600) if history_timestamps else _history_point_before(history, ts - 24 * 3600)
 
     prev_saw = _to_int(prev.get("saw_stock"), _to_int(point.get("saw_stock"), 0))
     prev_dip = _to_int(prev.get("dip_stock"), _to_int(point.get("dip_stock"), 0))
@@ -1200,14 +1316,14 @@ def _product_band_score(product_count: int, ready: int, full: int, burst: int) -
     return 10.0
 
 
-def _product_health_score(point: dict, history: list, ready: int, full: int, burst: int) -> float:
+def _product_health_score(point: dict, history: list, ready: int, full: int, burst: int, history_timestamps: list[int] | None = None) -> float:
     """
     成品健康（效率优先）：
     - 速度侧：关注 24h 内待二选消耗、成品增长与两者匹配度。
     - 库存侧：延用成品库存区间打分作为次权重。
     """
     ts = _to_int(point.get("ts"), int(time.time()))
-    prev = _history_point_before(history, ts - 24 * 3600)
+    prev = _history_point_before_sorted(history, history_timestamps, ts - 24 * 3600) if history_timestamps else _history_point_before(history, ts - 24 * 3600)
 
     prev_kiln_done = _to_int(prev.get("kiln_done_stock"), _to_int(point.get("kiln_done_stock"), 0))
     prev_product = _to_int(prev.get("product_count"), _to_int(point.get("product_count"), 0))
@@ -1296,6 +1412,19 @@ def _history_point_before(history: list, target_ts: int) -> dict:
     return pts[-1] or {}
 
 
+def _history_point_before_sorted(history: list, history_timestamps: list[int] | None, target_ts: int) -> dict:
+    if not history:
+        return {}
+    if not history_timestamps:
+        return _history_point_before(history, target_ts)
+    idx = bisect_right(history_timestamps, int(target_ts)) - 1
+    if idx < 0:
+        return history[0] or {}
+    if idx >= len(history):
+        idx = len(history) - 1
+    return history[idx] or {}
+
+
 def _drop_ratio_score(prev_val: int, cur_val: int) -> float:
     prev_n = max(0, _to_int(prev_val, 0))
     cur_n = max(0, _to_int(cur_val, 0))
@@ -1307,9 +1436,9 @@ def _drop_ratio_score(prev_val: int, cur_val: int) -> float:
     return max(0.0, min(100.0, (float(consumed) / float(max(1, prev_n))) * 100.0))
 
 
-def _middle_stage_flow_score(point: dict, history: list) -> float:
+def _middle_stage_flow_score(point: dict, history: list, history_timestamps: list[int] | None = None) -> float:
     ts = _to_int(point.get("ts"), int(time.time()))
-    prev = _history_point_before(history, ts - 24 * 3600)
+    prev = _history_point_before_sorted(history, history_timestamps, ts - 24 * 3600) if history_timestamps else _history_point_before(history, ts - 24 * 3600)
 
     prev_sorting = _to_int(prev.get("sorting_stock"), _to_int(point.get("sorting_stock"), 0))
     prev_kiln_done = _to_int(prev.get("kiln_done_stock"), _to_int(point.get("kiln_done_stock"), 0))
@@ -1353,7 +1482,13 @@ def _middle_stage_flow_score(point: dict, history: list) -> float:
     return max(0.0, min(100.0, score))
 
 
-def _make_efficiency_vector(point: dict, cfg: dict, history: list) -> dict:
+def _make_efficiency_vector(
+    point: dict,
+    cfg: dict,
+    history: list,
+    daily_use: float | None = None,
+    history_timestamps: list[int] | None = None,
+) -> dict:
     log_stock = _to_float(point.get("log_stock"), 0.0)
     saw_stock = _to_int(point.get("saw_stock"), 0)
     dip_stock = _to_int(point.get("dip_stock"), 0)
@@ -1361,11 +1496,11 @@ def _make_efficiency_vector(point: dict, cfg: dict, history: list) -> dict:
     kiln_done_stock = _to_int(point.get("kiln_done_stock"), 0)
     product_count = _to_int(point.get("product_count"), 0)
 
-    daily_use = _estimate_daily_log_consumption(history)
+    daily_use = _estimate_daily_log_consumption(history) if daily_use is None else float(daily_use)
     days_left = (log_stock / daily_use) if daily_use > 0 else 7.0
     raw_sec = max(0.0, min(100.0, (days_left / 3.0) * 100.0))
-    front_balance = _front_stage_conversion_score(point, history)
-    middle_flow = _middle_stage_flow_score(point, history)
+    front_balance = _front_stage_conversion_score(point, history, history_timestamps=history_timestamps)
+    middle_flow = _middle_stage_flow_score(point, history, history_timestamps=history_timestamps)
     backlog_health = _backlog_score(sorting_stock, kiln_done_stock)
     product_health = _product_health_score(
         point,
@@ -1373,6 +1508,7 @@ def _make_efficiency_vector(point: dict, cfg: dict, history: list) -> dict:
         _to_int(cfg.get("product_ready_threshold"), 26),
         _to_int(cfg.get("product_full_threshold"), 76),
         _to_int(cfg.get("product_burst_threshold"), 100),
+        history_timestamps=history_timestamps,
     )
     kiln_health = max(0.0, min(100.0, _to_float(point.get("kiln_health"), 60.0)))
     # 窑效率会影响积压健康；中段流速已包含窑阶段纪律指标。
@@ -1409,7 +1545,150 @@ def _period_avg_vector(history: list, cfg: dict, begin_ts: int, end_ts: int) -> 
     return {k: round(acc[k] / n, 1) for k in acc.keys()}
 
 
+def _period_avg_vector_precomputed(precomputed: list[tuple[int, dict]], begin_ts: int, end_ts: int) -> dict:
+    pts = [vec for ts, vec in precomputed if begin_ts <= ts <= end_ts]
+    if not pts:
+        return {"raw_security": 0.0, "front_balance": 0.0, "middle_flow": 0.0, "backlog_health": 0.0, "product_health": 0.0, "kiln_health": 0.0, "total_score": 0.0}
+    acc = {"raw_security": 0.0, "front_balance": 0.0, "middle_flow": 0.0, "backlog_health": 0.0, "product_health": 0.0, "kiln_health": 0.0, "total_score": 0.0}
+    for vec in pts:
+        for k in acc.keys():
+            acc[k] += _to_float(vec.get(k), 0.0)
+    n = float(len(pts))
+    return {k: round(acc[k] / n, 1) for k in acc.keys()}
+
+
 def _efficiency_summary(history: list, cfg: dict, lang: str = "zh") -> dict:
+    signature = _efficiency_cache_signature(history, cfg, lang)
+    cached_sig = str(_EFFICIENCY_MEMORY_CACHE.get("signature") or "")
+    cached_payload = _EFFICIENCY_MEMORY_CACHE.get("payload")
+    if cached_sig == signature and isinstance(cached_payload, dict):
+        return cached_payload
+
+    payload = _compute_efficiency_summary(history, cfg, lang=lang)
+    _EFFICIENCY_MEMORY_CACHE["signature"] = signature
+    _EFFICIENCY_MEMORY_CACHE["payload"] = payload
+    _EFFICIENCY_MEMORY_CACHE["generated_ts"] = int(time.time())
+    return payload
+
+
+def _build_ai_metric_insights(efficiency: dict, throughput: dict, intelligence: dict, lang: str = "zh") -> dict:
+    lc = _norm_lang(lang)
+    cur_day = (throughput or {}).get("current_day", {}) if isinstance(throughput, dict) else {}
+    cmp_week = ((throughput or {}).get("comparison") or {}).get("week", {}) if isinstance(throughput, dict) else {}
+    eff_cur = (efficiency or {}).get("current", {}) if isinstance(efficiency, dict) else {}
+    eff_week = (efficiency or {}).get("week", {}) if isinstance(efficiency, dict) else {}
+    eff_week_prev = (efficiency or {}).get("week_prev", {}) if isinstance(efficiency, dict) else {}
+
+    ratios = [
+        ("药浸/锯解", _to_float(cur_day.get("ratio_dip_vs_saw"), 0.0), "Dip/Saw"),
+        ("拣选/药浸", _to_float(cur_day.get("ratio_sort_vs_dip"), 0.0), "Sort/Dip"),
+        ("二选/拣选", _to_float(cur_day.get("ratio_secondary_vs_sort"), 0.0), "Secondary/Sort"),
+        ("成品/二选", _to_float(cur_day.get("ratio_product_vs_secondary"), 0.0), "Product/Secondary"),
+    ]
+    weakest_ratio = min(ratios, key=lambda item: item[1]) if ratios else ("-", 0.0, "-")
+
+    losses = [
+        ("原木→锯解", _to_float(cur_day.get("loss_raw_to_saw_rate_pct"), 0.0), "Raw->Saw"),
+        ("入窑→出窑", _to_float(cur_day.get("loss_kiln_in_to_out_rate_pct"), 0.0), "Kiln In->Out"),
+        ("出窑→成品", _to_float(cur_day.get("loss_out_to_product_rate_pct"), 0.0), "Out->Product"),
+    ]
+    highest_loss = max(losses, key=lambda item: item[1]) if losses else ("-", 0.0, "-")
+
+    week_mom = cmp_week.get("mom_pct")
+    week_mom = None if week_mom is None else round(_to_float(week_mom, 0.0), 1)
+    middle_delta = round(_to_float(eff_week.get("middle_flow"), 0.0) - _to_float(eff_week_prev.get("middle_flow"), 0.0), 1)
+    back_delta = round(_to_float(eff_week.get("backlog_health"), 0.0) - _to_float(eff_week_prev.get("backlog_health"), 0.0), 1)
+    root_name = str((((intelligence or {}).get("priority_stage") or {}).get("name")) or (((intelligence or {}).get("root_bottleneck") or {}).get("name")) or "-")
+
+    if lc == "en":
+        throughput_summary = f"AI reads today's weakest yield link at {weakest_ratio[2]} ({weakest_ratio[1]:.1f}%)."
+        throughput_action = f"Treat {root_name} as the first improvement lane, and especially watch the {weakest_ratio[2]} conversion."
+        loss_summary = f"AI sees the largest loss currently at {highest_loss[2]} ({highest_loss[1]:.1f}%)."
+        loss_action = "Check whether this is a normal process loss, a material-quality issue, or a handoff/tooling issue."
+        trend_summary = f"Weekly finished output is {'up' if (week_mom or 0) >= 0 else 'down'} {abs(week_mom or 0):.1f}% vs previous week; middle-flow delta {middle_delta:+.1f}, backlog-health delta {back_delta:+.1f}."
+        trend_action = "If output is not improving while middle/back sections stay weak, treat it as a sustained issue instead of a one-day fluctuation."
+    elif lc == "my":
+        throughput_summary = f"AI အမြင်အရ ယနေ့ အနည်းဆုံးထွက်နှုန်းက {weakest_ratio[0]} ({weakest_ratio[1]:.1f}%) ဖြစ်ပါသည်။"
+        throughput_action = f"{root_name} ကို ပထမဦးစားပေးတိုးမြှင့်ပြီး {weakest_ratio[0]} အချိုးကို အနီးကပ်စောင့်ကြည့်ပါ။"
+        loss_summary = f"AI အမြင်အရ လက်ရှိဆုံးရှုံးမှုအမြင့်ဆုံးအပိုင်းမှာ {highest_loss[0]} ({highest_loss[1]:.1f}%) ဖြစ်ပါသည်။"
+        loss_action = "ပုံမှန် process loss လား၊ ကုန်ကြမ်း quality ပြဿနာလား၊ handoff/tooling ပြဿနာလားဆိုတာ ခွဲကြည့်ပါ။"
+        trend_summary = f"ဒီအပတ်ကုန်ချောထွက်အားသည် အရင်အပတ်နှင့်ယှဉ်လျှင် {'တက်' if (week_mom or 0) >= 0 else 'ကျ'} {abs(week_mom or 0):.1f}% ဖြစ်ပြီး middle-flow {middle_delta:+.1f}၊ backlog-health {back_delta:+.1f} ဖြစ်ပါသည်။"
+        trend_action = "ထွက်အားမတက်သေးဘဲ အလယ်ပိုင်း/နောက်ပိုင်း အားနည်းနေလျှင် တစ်ရက်တည်းပြဿနာမဟုတ်ဘဲ ဆက်တိုက်ပြဿနာအဖြစ် ကိုင်တွယ်ပါ။"
+    else:
+        throughput_summary = f"AI 判断今天最弱的产比链更像在「{weakest_ratio[0]}」，当前只有 {weakest_ratio[1]:.1f}%。"
+        throughput_action = f"先按「{root_name}」去提产，同时重点盯住「{weakest_ratio[0]}」这段转化。"
+        loss_summary = f"AI 判断当前损耗最高的环节在「{highest_loss[0]}」，损耗率约 {highest_loss[1]:.1f}%。"
+        loss_action = "先区分这是正常工艺损耗，还是原料质量、承接节拍、工具设备导致的异常损耗。"
+        trend_summary = f"本周成品产出较上周{'上升' if (week_mom or 0) >= 0 else '下降'} {abs(week_mom or 0):.1f}%，同时中段流速 {middle_delta:+.1f}、积压健康 {back_delta:+.1f}。"
+        trend_action = "如果成品还没起色，但中段和后段一直偏弱，就按持续性问题处理，不要只当成某一天波动。"
+
+    return {
+        "throughput": {"summary": throughput_summary, "action": throughput_action},
+        "yield_loss": {"summary": loss_summary, "action": loss_action},
+        "trend": {"summary": trend_summary, "action": trend_action},
+    }
+
+
+def _throughput_ai_signature(cfg: dict, throughput: dict, lang: str) -> str:
+    payload = {
+        "lang": _norm_lang(lang),
+        "coeffs": {
+            "spec_override": _to_float((cfg or {}).get("throughput_spec_tray_m3_override"), 0.0),
+            "raw_mt_to_m3_factor": _to_float((cfg or {}).get("raw_mt_to_m3_factor"), 1.0),
+            "kiln_green_to_dry_shrinkage_pct": _to_float((cfg or {}).get("kiln_green_to_dry_shrinkage_pct"), 7.5),
+        },
+        "current_day": ((throughput or {}).get("current_day") or {}) if isinstance(throughput, dict) else {},
+        "current_week": ((throughput or {}).get("current_week") or {}) if isinstance(throughput, dict) else {},
+        "comparison": ((throughput or {}).get("comparison") or {}) if isinstance(throughput, dict) else {},
+    }
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _efficiency_cache_signature(history: list, cfg: dict, lang: str) -> str:
+    lc = _norm_lang(lang)
+    payload = {
+        "lang": lc,
+        "cfg": {
+            "product_ready_threshold": _to_int((cfg or {}).get("product_ready_threshold"), 26),
+            "product_full_threshold": _to_int((cfg or {}).get("product_full_threshold"), 76),
+            "product_burst_threshold": _to_int((cfg or {}).get("product_burst_threshold"), 100),
+            "enable_bottleneck_mode": _to_int((cfg or {}).get("enable_bottleneck_mode"), 1),
+            "bottleneck_kiln_done_threshold": _to_int((cfg or {}).get("bottleneck_kiln_done_threshold"), 40),
+            "bottleneck_relax_weight_pct": _to_float((cfg or {}).get("bottleneck_relax_weight_pct"), 35.0),
+            "improve_bonus_2day": _to_float((cfg or {}).get("improve_bonus_2day"), 10.0),
+            "improve_bonus_3day": _to_float((cfg or {}).get("improve_bonus_3day"), 5.0),
+            "smooth_day_window_points": _to_int((cfg or {}).get("smooth_day_window_points"), 3),
+            "smooth_week_window_points": _to_int((cfg or {}).get("smooth_week_window_points"), 3),
+            "weight_raw_security": _to_int((cfg or {}).get("weight_raw_security"), 20),
+            "weight_front_balance": _to_int((cfg or {}).get("weight_front_balance"), 20),
+            "weight_middle_flow": _to_int((cfg or {}).get("weight_middle_flow"), 20),
+            "weight_backlog_health": _to_int((cfg or {}).get("weight_backlog_health"), 20),
+            "weight_product_health": _to_int((cfg or {}).get("weight_product_health"), 20),
+        },
+        # 效率看板只依赖库存/托数/窑健康等信号，保留这些字段即可准确失效缓存。
+        "history": [
+            {
+                "ts": _to_int((p or {}).get("ts"), 0),
+                "log_stock": _to_float((p or {}).get("log_stock"), 0.0),
+                "saw_stock": _to_int((p or {}).get("saw_stock"), 0),
+                "dip_stock": _to_int((p or {}).get("dip_stock"), 0),
+                "sorting_stock": _to_int((p or {}).get("sorting_stock"), 0),
+                "kiln_done_stock": _to_int((p or {}).get("kiln_done_stock"), 0),
+                "product_count": _to_int((p or {}).get("product_count"), 0),
+                "kiln_health": _to_float((p or {}).get("kiln_health"), 0.0),
+                "kiln_overdue_ready": _to_int((p or {}).get("kiln_overdue_ready"), 0),
+                "kiln_overdue_unloading": _to_int((p or {}).get("kiln_overdue_unloading"), 0),
+                "kiln_overdue_drying": _to_int((p or {}).get("kiln_overdue_drying"), 0),
+            }
+            for p in (history or [])
+        ],
+    }
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _compute_efficiency_summary(history: list, cfg: dict, lang: str = "zh") -> dict:
     lc = _norm_lang(lang)
     radar_labels = [
         _t(lc, "radar_axis_raw_security", "原木保障"),
@@ -1433,22 +1712,41 @@ def _efficiency_summary(history: list, cfg: dict, lang: str = "zh") -> dict:
             "radar": {"current": [0, 0, 0, 0, 0, 0], "day": [0, 0, 0, 0, 0, 0], "week": [0, 0, 0, 0, 0, 0], "month": [0, 0, 0, 0, 0, 0]},
         }
     now_ts = int(time.time())
+    now_dt = datetime.now()
     day = 86400
-    week = 7 * day
-    month = 30 * day
+    history_sorted = sorted(history, key=lambda x: _to_int((x or {}).get("ts"), 0))
+    history_timestamps = [_to_int((p or {}).get("ts"), 0) for p in history_sorted]
+    daily_use = _estimate_daily_log_consumption(history_sorted)
+    precomputed = [
+        (
+            ts,
+            _make_efficiency_vector(
+                point,
+                cfg,
+                history_sorted,
+                daily_use=daily_use,
+                history_timestamps=history_timestamps,
+            ),
+        )
+        for ts, point in zip(history_timestamps, history_sorted)
+    ]
 
-    current = _make_efficiency_vector(history[-1], cfg, history)
-    day_vec = _period_avg_vector(history, cfg, now_ts - day, now_ts)
-    week_vec = _period_avg_vector(history, cfg, now_ts - week, now_ts)
-    month_vec = _period_avg_vector(history, cfg, now_ts - month, now_ts)
-    day_prev = _period_avg_vector(history, cfg, now_ts - 2 * day, now_ts - day)
-    week_prev = _period_avg_vector(history, cfg, now_ts - 2 * week, now_ts - week)
-    month_prev = _period_avg_vector(history, cfg, now_ts - 2 * month, now_ts - month)
+    current = precomputed[-1][1]
+    day_start, day_end = _period_ts_range("day", now_dt)
+    week_start, week_end = _period_ts_range("week", now_dt)
+    month_start, month_end = _period_ts_range("month", now_dt)
+    day_prev = _period_avg_vector_precomputed(precomputed, day_start - day, day_start)
+    week_prev_start, week_prev_end = _period_ts_range("week_prev", now_dt)
+    month_prev_start, month_prev_end = _period_ts_range("month_prev", now_dt)
+    day_vec = _period_avg_vector_precomputed(precomputed, day_start, day_end)
+    week_vec = _period_avg_vector_precomputed(precomputed, week_start, week_end)
+    month_vec = _period_avg_vector_precomputed(precomputed, month_start, month_end)
+    week_prev = _period_avg_vector_precomputed(precomputed, week_prev_start, week_prev_end)
+    month_prev = _period_avg_vector_precomputed(precomputed, month_prev_start, month_prev_end)
 
-    # 改善加分：积压连续下降就奖励“中段流速/积压健康”
-    drop_today = _backlog_drop(history, now_ts - day, now_ts)
-    drop_prev_day = _backlog_drop(history, now_ts - 2 * day, now_ts - day)
-    drop_prev2_day = _backlog_drop(history, now_ts - 3 * day, now_ts - 2 * day)
+    drop_today = _backlog_drop(history_sorted, day_start, day_end)
+    drop_prev_day = _backlog_drop(history_sorted, day_start - day, day_start)
+    drop_prev2_day = _backlog_drop(history_sorted, day_start - 2 * day, day_start - day)
     bonus = 0.0
     if drop_today > 0 and drop_prev_day > 0:
         bonus += _to_float(cfg.get("improve_bonus_2day"), 10.0)
@@ -1460,7 +1758,6 @@ def _efficiency_summary(history: list, cfg: dict, lang: str = "zh") -> dict:
     week_vec = _apply_bonus(week_vec, bonus, cfg)
     month_vec = _apply_bonus(month_vec, bonus, cfg)
 
-    # 平滑：按配置窗口与前一周期做混合，避免图形剧烈抖动
     day_vec = _smooth_with_prev(day_vec, day_prev, _to_int(cfg.get("smooth_day_window_points"), 3), cfg)
     week_vec = _smooth_with_prev(week_vec, week_prev, _to_int(cfg.get("smooth_week_window_points"), 3), cfg)
 
@@ -1483,6 +1780,155 @@ def _efficiency_summary(history: list, cfg: dict, lang: str = "zh") -> dict:
             "month": _vec6(month_vec),
         },
     }
+
+
+def _build_ai_calibrated_throughput(session, cfg: dict, throughput: dict, lang: str = "zh") -> dict:
+    lc = _norm_lang(lang)
+    current_coeffs = {
+        "spec_tray_m3_override": round(_to_float((cfg or {}).get("throughput_spec_tray_m3_override"), 0.0), 4),
+        "raw_mt_to_m3_factor": round(_to_float((cfg or {}).get("raw_mt_to_m3_factor"), 1.0), 4),
+        "kiln_green_to_dry_shrinkage_pct": round(_to_float((cfg or {}).get("kiln_green_to_dry_shrinkage_pct"), 7.5), 3),
+    }
+    if not ALERT_AI_CALIBRATION_ENABLED:
+        return {
+            "signature": "disabled",
+            "generated_ts": int(time.time()),
+            "source": "disabled",
+            "summary": "AI 系数校准已关闭，当前沿用系统系数。",
+            "reason": "",
+            "action": "",
+            "current_coefficients": current_coeffs,
+            "recommended_coefficients": dict(current_coeffs),
+            "show_recommendation": False,
+            "calculated": throughput,
+        }
+
+    signature = _throughput_ai_signature(cfg, throughput, lc)
+    now_ts = int(time.time())
+    cached = _load_json(session, ALERT_AI_THROUGHPUT_CACHE_KEY, {})
+    if isinstance(cached, dict):
+        cached_sig = str(cached.get("signature") or "")
+        cached_ts = _to_int(cached.get("generated_ts"), 0)
+        if cached_sig == signature and (now_ts - cached_ts) <= 6 * 3600:
+            return cached
+
+    cur_day = ((throughput or {}).get("current_day") or {}) if isinstance(throughput, dict) else {}
+    cur_week = ((throughput or {}).get("current_week") or {}) if isinstance(throughput, dict) else {}
+    cmp_week = (((throughput or {}).get("comparison") or {}).get("week") or {}) if isinstance(throughput, dict) else {}
+    prompt_payload = {
+        "language": lc,
+        "goal": "校准木材厂环节产比/损耗/趋势的计算系数，给出建议值。",
+        "current_coefficients": current_coeffs,
+        "snapshot": {
+            "day": {
+                "saw_m3": cur_day.get("saw_m3"),
+                "dip_m3": cur_day.get("dip_m3"),
+                "sort_m3": cur_day.get("sort_m3"),
+                "secondary_m3": cur_day.get("secondary_m3"),
+                "product_m3": cur_day.get("product_m3"),
+                "ratio_dip_vs_saw": cur_day.get("ratio_dip_vs_saw"),
+                "ratio_sort_vs_dip": cur_day.get("ratio_sort_vs_dip"),
+                "ratio_secondary_vs_sort": cur_day.get("ratio_secondary_vs_sort"),
+                "ratio_product_vs_secondary": cur_day.get("ratio_product_vs_secondary"),
+                "loss_raw_to_saw_rate_pct": cur_day.get("loss_raw_to_saw_rate_pct"),
+                "loss_kiln_in_to_out_rate_pct": cur_day.get("loss_kiln_in_to_out_rate_pct"),
+                "loss_out_to_product_rate_pct": cur_day.get("loss_out_to_product_rate_pct"),
+            },
+            "week": {
+                "product_m3": cur_week.get("product_m3"),
+                "mom_pct": cmp_week.get("mom_pct"),
+                "yoy_pct": cmp_week.get("yoy_pct"),
+                "loss_raw_to_saw_rate_pct": cur_week.get("loss_raw_to_saw_rate_pct"),
+                "loss_kiln_in_to_out_rate_pct": cur_week.get("loss_kiln_in_to_out_rate_pct"),
+                "loss_out_to_product_rate_pct": cur_week.get("loss_out_to_product_rate_pct"),
+            },
+        },
+    }
+    if lc == "en":
+        system_prompt = "You are AIF's throughput calibration AI. Return JSON only."
+    elif lc == "my":
+        system_prompt = "သင်သည် AIF ၏ throughput calibration AI ဖြစ်သည်။ JSON ပဲထုတ်ပါ။"
+    else:
+        system_prompt = "你是 AIF 的产比损耗系数校准 AI，只输出 JSON。"
+    user_prompt = (
+        "请基于下面的快照，判断当前系统系数是否偏离现场现实，并给出建议系数。\n"
+        "要求：\n"
+        "1. 只输出 JSON。\n"
+        "2. 建议值不要离谱，尽量在现场可接受的小范围调整。\n"
+        "3. 如果当前值已经合理，也可以建议维持不变。\n"
+        "4. 输出字段："
+        "{\"recommended\":{\"spec_tray_m3_override\":0.0,\"raw_mt_to_m3_factor\":1.0,\"kiln_green_to_dry_shrinkage_pct\":7.5},"
+        "\"summary\":\"一句摘要\","
+        "\"reason\":\"一句理由\","
+        "\"action\":\"一句建议\"}\n"
+        f"{json.dumps(prompt_payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+    recommended = dict(current_coeffs)
+    summary = ""
+    reason = ""
+    action = ""
+    source = "fallback"
+    try:
+        raw = ask_ai(user_prompt, system_prompt=system_prompt, max_tokens=180, timeout=28)
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = json.loads(_extract_first_json_object(raw))
+        rec = parsed.get("recommended", {}) if isinstance(parsed, dict) and isinstance(parsed.get("recommended"), dict) else {}
+        recommended = {
+            "spec_tray_m3_override": round(max(0.0, min(5.0, _to_float(rec.get("spec_tray_m3_override"), current_coeffs["spec_tray_m3_override"]))), 4),
+            "raw_mt_to_m3_factor": round(max(0.1, min(3.0, _to_float(rec.get("raw_mt_to_m3_factor"), current_coeffs["raw_mt_to_m3_factor"]))), 4),
+            "kiln_green_to_dry_shrinkage_pct": round(max(0.0, min(30.0, _to_float(rec.get("kiln_green_to_dry_shrinkage_pct"), current_coeffs["kiln_green_to_dry_shrinkage_pct"]))), 3),
+        }
+        summary = str(parsed.get("summary") or "").strip()
+        reason = str(parsed.get("reason") or "").strip()
+        action = str(parsed.get("action") or "").strip()
+        source = "ai"
+    except Exception:
+        if lc == "en":
+            summary = "AI calibration is temporarily unavailable, so current coefficients are kept."
+            reason = "No valid AI calibration result was returned."
+            action = "Keep current coefficients and review again after more production data accumulates."
+        elif lc == "my":
+            summary = "AI calibration မရရှိသေးသောကြောင့် လက်ရှိ coefficient များကို ဆက်သုံးထားသည်။"
+            reason = "မှန်ကန်သော AI calibration result မပြန်လာပါ။"
+            action = "လက်ရှိ coefficient များကို ဆက်သုံးပြီး ထုတ်လုပ်မှုဒေတာပိုစုဆောင်းပြီးနောက် ပြန်စစ်ပါ။"
+        else:
+            summary = "AI 校准暂不可用，当前先沿用系统系数。"
+            reason = "本轮没有拿到有效的 AI 系数校准结果。"
+            action = "先沿用当前系数，等更多生产数据累积后再复核。"
+
+    cfg_ai = dict(cfg or {})
+    cfg_ai["throughput_spec_tray_m3_override"] = recommended["spec_tray_m3_override"]
+    cfg_ai["raw_mt_to_m3_factor"] = recommended["raw_mt_to_m3_factor"]
+    cfg_ai["kiln_green_to_dry_shrinkage_pct"] = recommended["kiln_green_to_dry_shrinkage_pct"]
+    calculated = _build_stage_throughput_payload(lang=lc, cfg=cfg_ai)
+    out = {
+        "signature": signature,
+        "generated_ts": now_ts,
+        "generated_at": _format_ts(now_ts),
+        "source": source,
+        "current_coefficients": current_coeffs,
+        "recommended_coefficients": recommended,
+        "summary": summary,
+        "reason": reason,
+        "action": action,
+        "calculated": calculated,
+    }
+    spec_delta = abs(_to_float(recommended.get("spec_tray_m3_override"), 0.0) - _to_float(current_coeffs.get("spec_tray_m3_override"), 0.0))
+    raw_delta = abs(_to_float(recommended.get("raw_mt_to_m3_factor"), 1.0) - _to_float(current_coeffs.get("raw_mt_to_m3_factor"), 1.0))
+    shrink_delta = abs(_to_float(recommended.get("kiln_green_to_dry_shrinkage_pct"), 7.5) - _to_float(current_coeffs.get("kiln_green_to_dry_shrinkage_pct"), 7.5))
+    out["show_recommendation"] = bool(
+        source == "ai" and (
+            spec_delta >= 0.03 or
+            raw_delta >= 0.05 or
+            shrink_delta >= 0.8
+        )
+    )
+    _save_json(session, ALERT_AI_THROUGHPUT_CACHE_KEY, out)
+    session.commit()
+    return out
 
 
 def update_alert_event(event_id: str, action: str, operator: str, owner: str = "", note: str = "") -> tuple[bool, str]:
@@ -1562,7 +2008,7 @@ def _weekly_stats(events: list) -> dict:
     }
 
 
-def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh") -> dict:
+def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh", include_forecast: bool = True) -> dict:
     lc = _norm_lang(lang)
     session = Session()
     try:
@@ -1593,7 +2039,15 @@ def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh") -> dict:
         weekly = _weekly_stats(events)
         efficiency = _efficiency_summary(_load_json(session, ALERT_HISTORY_KEY, []), cfg=cfg, lang=lc)
         throughput = _build_stage_throughput_payload(lang=lc, cfg=cfg)
+        throughput_ai = _build_ai_calibrated_throughput(session, cfg=cfg, throughput=throughput, lang=lc)
         intelligence = build_factory_intelligence(_build_stock_snapshot_for_intelligence(lc), efficiency, throughput, lang=lc)
+        metric_ai = _build_ai_metric_insights(efficiency, throughput, intelligence, lang=lc)
+        traceability = build_traceability_snapshot(lang=lc, limit=8)
+        traceability_links = _build_traceability_links(lc, intelligence, traceability)
+        forecast = {}
+        if include_forecast:
+            from web.services.forecast_service import build_forecast_payload
+            forecast = build_forecast_payload(lang=lc, stock=_build_stock_snapshot_for_intelligence(lc), intelligence=intelligence)
         versions = sorted(versions, key=lambda x: _to_int(x.get("ts"), 0), reverse=True)[:30]
         for v in versions:
             v["ts_text"] = _format_ts(_to_int(v.get("ts"), 0))
@@ -1611,7 +2065,12 @@ def get_alert_center_payload(limit_recent: int = 120, lang: str = "zh") -> dict:
             "weekly": weekly,
             "efficiency": efficiency,
             "throughput": throughput,
+            "throughput_ai": throughput_ai,
             "factory_intelligence": intelligence,
+            "metric_ai": metric_ai,
+            "forecast": forecast,
+            "traceability": traceability,
+            "traceability_links": traceability_links,
             "ai_deep_monitor": ai_deep_monitor,
             "versions": versions,
             "engine_cfg": cfg,

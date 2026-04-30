@@ -28,3 +28,4 @@ def _load_template_file(name: str) -> str:
 
 LOGIN_TEMPLATE = _load_template_file("login.html")
 HTML_TEMPLATE = _load_template_file("main.html")
+AI_OVERVIEW_TEMPLATE = _load_template_file("ai_overview.html")

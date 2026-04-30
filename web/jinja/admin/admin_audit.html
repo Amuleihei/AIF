@@ -22,6 +22,7 @@
         <a href="{{ url_for('admin_root') }}" class="back-link">← 管理总览</a>
         <a href="{{ url_for('admin_users') }}" class="link-inline">用户管理</a>
         <a href="{{ url_for('admin_alert_settings') }}" class="link-inline">预警阈值</a>
+        <a href="{{ url_for('admin_traceability', lang=lang) }}" class="link-inline">{{ texts.get('traceability_title', '事件追溯') }}</a>
         <h1>{{ texts.get('audit_logs', '审计日志') }}</h1>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 10px;">
             <a href="/admin/audit?action=submit_log_entry" style="font-size:12px; color:#0d6efd; text-decoration:none; border:1px solid #dbeafe; padding:4px 8px; border-radius:999px;">原木入库</a>

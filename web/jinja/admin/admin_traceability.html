@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.get('traceability_title', '事件追溯') }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
+    <style>
+        :root {
+            --bg: #f4f7fb;
+            --card: #ffffff;
+            --line: #dde6f1;
+            --ink: #17212f;
+            --muted: #667085;
+            --accent: #0f766e;
+            --accent-soft: #ecfeff;
+            --chip: #eef2ff;
+            --chip-ink: #3730a3;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: linear-gradient(180deg, #edf4fb 0%, var(--bg) 45%, var(--bg) 100%); color: var(--ink); }
+        .shell { max-width: 1280px; margin: 0 auto; }
+        .page { background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 36px rgba(15, 23, 42, 0.08); overflow: hidden; }
+        .topbar { padding: 14px 18px 0; display:flex; flex-wrap:wrap; gap:8px; }
+        .link { display:inline-flex; align-items:center; gap:6px; text-decoration:none; color:#2563eb; border:1px solid #dbeafe; background:#f8fbff; border-radius:999px; padding:6px 10px; font-size:13px; }
+        .hero { padding: 16px 18px 10px; display:grid; grid-template-columns: 1.3fr .7fr; gap:14px; align-items:end; }
+        .title h1 { margin:0; font-size:26px; }
+        .title p { margin:8px 0 0; color:var(--muted); line-height:1.6; }
+        .stamp { padding:12px 14px; border:1px solid var(--line); border-radius:14px; background: linear-gradient(180deg, #fbfdff 0%, #f4fbff 100%); }
+        .stamp .k { color:var(--muted); font-size:12px; }
+        .stamp .v { margin-top:4px; font-size:15px; font-weight:700; word-break: break-word; }
+        .stats { padding: 6px 18px 0; display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; }
+        .stat { border:1px solid var(--line); border-radius:14px; padding:12px 14px; background: linear-gradient(180deg, #f9fbff 0%, #ffffff 100%); }
+        .stat .k { color:var(--muted); font-size:12px; }
+        .stat .v { margin-top:5px; font-size:22px; font-weight:700; }
+        .main { padding: 14px 18px 18px; display:grid; grid-template-columns: 320px minmax(0, 1fr); gap:14px; }
+        .panel { border:1px solid var(--line); border-radius:16px; background:var(--card); overflow:hidden; }
+        .panel-head { padding:14px 16px 10px; border-bottom:1px solid #edf2f7; }
+        .panel-head h3 { margin:0; font-size:16px; color:var(--accent); }
+        .panel-head p { margin:6px 0 0; color:var(--muted); font-size:12px; line-height:1.5; }
+        .panel-body { padding:14px 16px 16px; }
+        .filter-form { display:grid; gap:10px; }
+        .field { display:grid; gap:6px; }
+        .field label { font-size:12px; color:#475467; font-weight:700; }
+        .field input { width:100%; padding:10px 11px; border:1px solid #d0d9e4; border-radius:10px; font-size:13px; }
+        .btn { width:100%; padding:10px 12px; border:none; border-radius:10px; background:#0d6efd; color:#fff; cursor:pointer; font-size:14px; font-weight:700; }
+        .hint { color:var(--muted); font-size:12px; line-height:1.55; }
+        .refs { display:flex; flex-wrap:wrap; gap:6px; }
+        .ref { display:inline-flex; align-items:center; gap:4px; padding:4px 9px; border-radius:999px; background:var(--accent-soft); color:#155e75; font-size:12px; }
+        .event-list { display:grid; gap:10px; }
+        .event-card { border:1px solid #e6edf5; border-radius:14px; padding:12px 13px; background:#fcfdff; }
+        .event-top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+        .event-meta { min-width:0; }
+        .event-meta strong { display:block; font-size:14px; }
+        .event-line { margin-top:4px; font-size:13px; color:#334155; word-break: break-word; }
+        .event-detail { margin-top:8px; color:#475467; font-size:13px; line-height:1.55; white-space:pre-wrap; word-break: break-word; }
+        .badge { display:inline-block; padding:3px 9px; border-radius:999px; background:var(--chip); color:var(--chip-ink); font-size:12px; flex-shrink:0; }
+        .muted { color:var(--muted); font-size:12px; }
+        .empty { padding:18px 4px; color:var(--muted); }
+        .subgrid { display:grid; grid-template-columns: minmax(0, 1fr) 320px; gap:14px; }
+        @media (max-width: 1080px) {
+            .hero { grid-template-columns: 1fr; }
+            .main { grid-template-columns: 1fr; }
+            .subgrid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 760px) {
+            body { padding: 10px; }
+            .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 520px) {
+            .stats { grid-template-columns: 1fr; }
+            .topbar { padding: 12px 12px 0; }
+            .hero, .stats, .main { padding-left: 12px; padding-right: 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="page">
+            <div class="topbar">
+                <a class="link" href="{{ url_for('admin_root', lang=lang) }}">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+                <a class="link" href="{{ url_for('admin_audit_logs', lang=lang) }}">{{ texts.get('audit_logs', '审计日志') }}</a>
+                <a class="link" href="{{ url_for('admin_alert_settings', lang=lang) }}">{{ texts.get('alert_threshold', '预警阈值') }}</a>
+            </div>
+
+            <div class="hero">
+                <div class="title">
+                    <h1>{{ texts.get('traceability_title', '事件追溯') }}</h1>
+                    <p>{{ texts.get('traceability_subtitle', '把原木、生产、物流、财务、人事放到同一条事件链里。') }}</p>
+                </div>
+                <div class="stamp">
+                    <div class="k">{{ texts.get('traceability_latest_time', '最近时间') }}</div>
+                    <div class="v">{{ result.summary.latest_time }}</div>
+                    <div class="muted" style="margin-top:8px;">{{ result.day or snapshot.day }} · {{ result.template or snapshot.template or 'traceability_v1' }}</div>
+                </div>
+            </div>
+
+            <div class="stats">
+                <div class="stat"><div class="k">{{ texts.get('traceability_event_total', '事件总数') }}</div><div class="v">{{ result.summary.event_total }}</div></div>
+                <div class="stat"><div class="k">{{ texts.get('traceability_stage_total', '覆盖环节') }}</div><div class="v">{{ result.summary.stage_total }}</div></div>
+                <div class="stat"><div class="k">{{ texts.get('traceability_top_stage', '最活跃环节') }}</div><div class="v" style="font-size:18px;">{{ result.summary.top_stage }}</div></div>
+                <div class="stat"><div class="k">{{ texts.get('traceability_refs', '追溯锚点') }}</div><div class="v">{{ result.hot_refs|length }}</div></div>
+            </div>
+
+            <div class="main">
+                <div class="panel">
+                    <div class="panel-head">
+                        <h3>{{ texts.get('query_btn', '查询') }}</h3>
+                        <p>{{ texts.get('traceability_query_hint', '车牌 / 批次号 / 产品号 / 窑号 / 物流单 / 人名') }}</p>
+                    </div>
+                    <div class="panel-body">
+                        <form method="GET" action="{{ url_for('admin_traceability') }}" class="filter-form">
+                            <input type="hidden" name="lang" value="{{ lang }}">
+                            <div class="field">
+                                <label>{{ texts.get('traceability_title', '事件追溯') }}</label>
+                                <input type="text" name="q" value="{{ result.keyword }}" placeholder="{{ texts.get('traceability_query_hint', '车牌 / 批次号 / 产品号 / 窑号 / 物流单 / 人名') }}">
+                            </div>
+                            <div class="field">
+                                <label>{{ texts.get('traceability_time', '时间') }}</label>
+                                <input type="date" name="date" value="{{ result.day }}">
+                            </div>
+                            <div class="field">
+                                <label>{{ texts.get('traceability_action', '动作') }}</label>
+                                <input type="text" name="action" value="{{ result.action }}" placeholder="{{ texts.get('traceability_result_title', '追溯结果') }}">
+                            </div>
+                            <button type="submit" class="btn">{{ texts.get('query_btn', '查询') }}</button>
+                        </form>
+
+                        {% if result.hot_refs %}
+                        <div style="margin-top:14px;">
+                            <div class="hint" style="margin-bottom:8px;">{{ texts.get('traceability_refs', '追溯锚点') }}</div>
+                            <div class="refs">
+                                {% for item in result.hot_refs %}
+                                <span class="ref">{{ item.value }} ×{{ item.count }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="subgrid">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h3>{{ texts.get('traceability_result_title', '追溯结果') }}</h3>
+                            <p>{{ texts.get('traceability_event_total', '事件总数') }} {{ result.summary.event_total }}</p>
+                        </div>
+                        <div class="panel-body">
+                            <div class="event-list">
+                                {% for event in result.events %}
+                                <div class="event-card">
+                                    <div class="event-top">
+                                        <div class="event-meta">
+                                            <strong>{{ event.action }} · {{ event.target or '-' }}</strong>
+                                            <div class="event-line">{{ event.created_at }} · {{ event.stage_label }}{% if event.operator %} · {{ event.operator }}{% endif %}</div>
+                                        </div>
+                                        <span class="badge">{{ event.stage_label }}</span>
+                                    </div>
+                                    <div class="event-detail">{{ event.detail or '-' }}</div>
+                                    {% if event.refs %}
+                                    <div class="refs" style="margin-top:10px;">
+                                        {% for ref in event.refs %}
+                                        <span class="ref">{{ ref }}</span>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                                {% if not result.events %}
+                                <div class="empty">{{ texts.get('traceability_lookup_empty', '没有找到相关追溯结果') }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-head">
+                            <h3>{{ texts.get('traceability_recent_title', '最近事件') }}</h3>
+                            <p>{{ texts.get('traceability_top_stage', '最活跃环节') }}: {{ snapshot.summary.top_stage if snapshot.summary else '-' }}</p>
+                        </div>
+                        <div class="panel-body">
+                            <div class="event-list">
+                                {% for event in snapshot.events %}
+                                <div class="event-card">
+                                    <div class="event-top">
+                                        <div class="event-meta">
+                                            <strong>{{ event.stage_label }}</strong>
+                                            <div class="event-line">{{ event.created_at }}</div>
+                                        </div>
+                                        <span class="badge">{{ event.action }}</span>
+                                    </div>
+                                    <div class="event-detail">{{ event.target or '-' }}</div>
+                                </div>
+                                {% endfor %}
+                                {% if not snapshot.events %}
+                                <div class="empty">{{ texts.get('traceability_empty', '暂无可追溯事件') }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

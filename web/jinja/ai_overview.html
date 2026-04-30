@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.get('ai_overview_title', 'AI总览') }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages/main.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: right; margin-bottom: 10px;">
+            <label for="lang-select">{{ texts.language }}:</label>
+            <select id="lang-select" onchange="changeLanguage(this.value)">
+                <option value="zh" {% if lang == 'zh' %}selected{% endif %}>{{ texts.chinese }}</option>
+                <option value="en" {% if lang == 'en' %}selected{% endif %}>{{ texts.english }}</option>
+                <option value="my" {% if lang == 'my' %}selected{% endif %}>{{ texts.burmese }}</option>
+            </select>
+        </div>
+
+        <div class="user-info">
+            {{ texts.login }}: {{ current_user.username }} |
+            <a href="{{ url_for('index', lang=lang) }}">{{ texts.back_home }}</a> |
+            <a href="{{ url_for('logout') }}" class="logout-btn">{{ texts.logout }}</a>
+        </div>
+
+        <h1>{{ texts.get('ai_overview_title', 'AI总览') }}</h1>
+
+        {% if factory_intelligence %}
+        <div class="section" style="border-left:4px solid #0f766e; background:
+            radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 34%),
+            linear-gradient(180deg, rgba(240, 253, 250, 0.95) 0%, #ffffff 100%);
+            box-shadow:0 18px 40px rgba(15, 23, 42, 0.06);">
+            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+                <div style="max-width:680px;">
+                    <h2 style="margin:0;">🧠 {{ texts.get('intelligence_card_title', '智能判断') }}</h2>
+                    <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ texts.get('intelligence_card_desc', 'AI持续监测全流程节拍，判断当前压力位置、优先提升环节和协同动作。') }}</p>
+                </div>
+                <div style="padding:8px 12px; border-radius:999px; background:rgba(255,255,255,0.72); border:1px solid rgba(148,163,184,0.22); color:#0f766e; font-size:12px; backdrop-filter:blur(12px);">
+                    {{ factory_intelligence.overview }}
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:14px;">
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_symptom_stage', '当前压力位置') }}</div>
+                    <div style="margin-top:6px; font-size:18px; font-weight:700; color:#0f172a;">{{ factory_intelligence.pressure_stage.name if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.name }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.pressure_stage.reason if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.reason }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_root_cause', '优先提升环节') }}</div>
+                    <div style="margin-top:6px; font-size:18px; font-weight:700; color:#0f172a;">{{ factory_intelligence.priority_stage.name if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.name }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.priority_stage.reason if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.reason }}</div>
+                </div>
+                <div style="padding:14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); backdrop-filter:blur(12px);">
+                    <div style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_recommendations', '今日建议') }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[0] if factory_intelligence.recommendations else '-' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[1] if factory_intelligence.recommendations|length > 1 else '' }}</div>
+                    <div style="margin-top:8px; color:#475569; font-size:13px; line-height:1.55;">{{ factory_intelligence.recommendations[2] if factory_intelligence.recommendations|length > 2 else '' }}</div>
+                </div>
+            </div>
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.78); color:#0f172a; line-height:1.6;">
+                <strong style="font-size:12px; color:#64748b;">{{ texts.get('intelligence_brief', '智能摘要') }}</strong>
+                <div style="margin-top:6px;">{{ factory_intelligence.brief }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if ai_deep_monitor and ai_deep_monitor.summary %}
+        <div class="section" style="border-left:4px solid #0f172a; background:
+            radial-gradient(circle at top left, rgba(15, 23, 42, 0.08), transparent 32%),
+            linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+            box-shadow:0 18px 36px rgba(15, 23, 42, 0.05);">
+            <h2 style="margin:0;">{{ texts.get('intelligence_panel_title', 'AI建议') }}</h2>
+            <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.generated_at }} · {{ ai_deep_monitor.trigger }}</p>
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.88); color:#0f172a; line-height:1.6;">
+                {{ ai_deep_monitor.summary }}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if forecast and forecast.summary %}
+        <div class="section" style="border-left:4px solid #2563eb; background:
+            radial-gradient(circle at top left, rgba(37, 99, 235, 0.09), transparent 32%),
+            linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+            box-shadow:0 18px 36px rgba(15, 23, 42, 0.05);">
+            <h2 style="margin:0;">{{ texts.get('forecast_title', '预测层') }}</h2>
+            <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ forecast.generated_at }} · {{ forecast.template_version or 'forecast_v1' }}</p>
+            <div style="margin-top:12px; padding:12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius:14px; background:rgba(255,255,255,0.92); color:#0f172a; line-height:1.6;">
+                {{ forecast.summary }}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="section" id="web-ai-assistant" style="border-left:4px solid #0f766e;">
+            <h2 style="margin:0;">{{ texts.get('ai_assistant_title', 'AI助手') }}</h2>
+            <p style="margin:6px 0 0; color:#4b5563; font-size:13px;">{{ texts.get('ai_assistant_desc', '让AI结合当前库存、窑状态、节拍和风险，帮你判断今天先抓什么。') }}</p>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                <button type="button" onclick="fillAiAssistantPrompt('{{ texts.get('ai_prompt_today_focus', '根据当前数据，今天最需要先处理的3件事是什么？')|e }}')" style="background:#0f766e;">{{ texts.get('ai_quick_today_focus', '看今日重点') }}</button>
+                <button type="button" onclick="fillAiAssistantPrompt('{{ texts.get('ai_prompt_top_risk', '当前最值得优先处理的风险是什么？为什么？')|e }}')" style="background:#0f766e;">{{ texts.get('ai_quick_top_risk', '看最急风险') }}</button>
+            </div>
+            <div style="margin-top:12px;">
+                <textarea id="ai-assistant-input" rows="4" placeholder="{{ texts.get('ai_assistant_placeholder', '例如：根据现在的库存、窑状态和班组情况，今天我该怎么排班和处理积压？') }}" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:12px; resize:vertical; font:inherit; box-sizing:border-box;"></textarea>
+                <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+                    <div id="ai-assistant-status" style="font-size:12px; color:#6b7280;">{{ texts.get('ai_assistant_hint', '回车换行，Ctrl+Enter 可直接发送。') }}</div>
+                    <button type="button" id="ai-assistant-submit" onclick="submitAiAssistant()" style="background:#0f766e;">{{ texts.get('ai_assistant_send', '发送给AI') }}</button>
+                </div>
+            </div>
+            <div id="ai-assistant-answer" style="display:none; margin-top:12px; padding:14px; border:1px solid #dbe3ef; border-radius:12px; background:rgba(255,255,255,0.92); color:#111827; white-space:pre-wrap; line-height:1.6;"></div>
+        </div>
+    </div>
+
+<script>
+function changeLanguage(lang) {
+    const url = new URL(window.location);
+    url.searchParams.set('lang', lang);
+    window.location.href = url.toString();
+}
+function fillAiAssistantPrompt(text) {
+    const input = document.getElementById('ai-assistant-input');
+    if (!input) return;
+    input.value = text || '';
+    input.focus();
+}
+function setAiAssistantStatus(text) {
+    const node = document.getElementById('ai-assistant-status');
+    if (node) node.textContent = text || '';
+}
+function setAiAssistantLoading(isLoading) {
+    const btn = document.getElementById('ai-assistant-submit');
+    if (!btn) return;
+    btn.disabled = !!isLoading;
+    btn.textContent = isLoading ? "{{ texts.get('loading', '处理中...') }}" : "{{ texts.get('ai_assistant_send', '发送给AI') }}";
+}
+function showAiAssistantAnswer(text) {
+    const box = document.getElementById('ai-assistant-answer');
+    if (!box) return;
+    box.style.display = 'block';
+    box.textContent = text || '';
+}
+function submitAiAssistant() {
+    const input = document.getElementById('ai-assistant-input');
+    if (!input) return;
+    const question = (input.value || '').trim();
+    if (!question) {
+        setAiAssistantStatus("{{ texts.get('ai_assistant_need_question', '请先输入问题') }}");
+        return;
+    }
+    setAiAssistantLoading(true);
+    setAiAssistantStatus("{{ texts.get('loading', '处理中...') }}");
+    fetch('/api/ai-assistant?lang={{ lang }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question})
+    }).then(r => r.json()).then(data => {
+        if (data && data.ok) {
+            showAiAssistantAnswer(data.answer || '-');
+            setAiAssistantStatus("{{ texts.get('ai_assistant_done', '已完成') }}");
+            return;
+        }
+        const err = (data && data.error) ? data.error : "{{ texts.get('ai_assistant_failed', 'AI请求失败') }}";
+        showAiAssistantAnswer(err);
+        setAiAssistantStatus(err);
+    }).catch(() => {
+        const err = "{{ texts.get('ai_assistant_failed', 'AI请求失败') }}";
+        showAiAssistantAnswer(err);
+        setAiAssistantStatus(err);
+    }).finally(() => setAiAssistantLoading(false));
+}
+</script>
+</body>
+</html>

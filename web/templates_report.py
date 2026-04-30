@@ -61,6 +61,7 @@ DAILY_REPORT_TEMPLATE = """
 
         {% if report.ai_deep_monitor and report.ai_deep_monitor.summary %}
         <h3>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h3>
+        <p class="muted">{{ report.ai_deep_monitor.generated_at }} · {{ report.ai_deep_monitor.trigger }} · {{ texts.get('ai_template_version_label', 'Template') }} {{ report.ai_deep_monitor.template_version or 'deep_monitor_v2' }}</p>
         <table>
             <tbody>
                 <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.ai_deep_monitor.summary }}</td></tr>
@@ -81,6 +82,76 @@ DAILY_REPORT_TEMPLATE = """
                 {% if report.factory_intelligence.weekly_progress %}
                 <tr><th>{{ texts.get('weekly_progress_title', 'Weekly Improvement') }}</th><td>{{ report.factory_intelligence.weekly_progress.summary }}</td></tr>
                 {% endif %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.equipment_quality %}
+        <h3>{{ report.equipment_quality.title or '设备与质量闭环' }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.equipment_quality.summary }}</td></tr>
+                <tr><th>{{ texts.get('equipment_quality_band_saw_label', '带锯') }}</th><td>{{ report.equipment_quality.metrics.band_saw_actual_trays }}/{{ report.equipment_quality.metrics.band_saw_target_trays }} 托</td></tr>
+                <tr><th>{{ texts.get('equipment_quality_secondary_label', '二选') }}</th><td>{{ report.equipment_quality.metrics.secondary_actual_pcs if report.equipment_quality.metrics.secondary_actual_pcs is not none else '-' }}/{{ report.equipment_quality.metrics.secondary_target_pcs }} 件</td></tr>
+                <tr><th>{{ texts.get('equipment_quality_utilization_label', '带锯利用率') }}</th><td>{{ report.equipment_quality.metrics.band_saw_utilization_pct }}%</td></tr>
+                <tr><th>{{ texts.get('equipment_quality_risks_label', '关键风险') }}</th><td>{{ report.equipment_quality.risks|join('；') if report.equipment_quality.risks else '-' }}</td></tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.role_collaboration %}
+        <h3>{{ report.role_collaboration.title or '角色协同建议' }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_personnel_changes_summary_label', 'Summary') }}</th><td>{{ report.role_collaboration.summary }}</td></tr>
+                {% for item in report.role_collaboration.rows %}
+                <tr><th>{{ item.role }}</th><td>{{ item.summary }}<br>{{ item.action }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.personnel_changes %}
+        <h3>{{ texts.get('report_personnel_changes_title', 'Personnel Changes') }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_personnel_changes_summary_label', 'Summary') }}</th><td>{{ report.personnel_changes.summary }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_added_label', 'Added') }}</th><td>{{ report.personnel_changes.added_count }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_left_label', 'Left') }}</th><td>{{ report.personnel_changes.left_count }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_net_change_label', 'Net Change') }}</th><td>{{ report.personnel_changes.net_change }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_added_names_label', 'Added Names') }}</th><td>{{ report.personnel_changes.added_names|join('、') if report.personnel_changes.added_names else '-' }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_left_names_label', 'Left Names') }}</th><td>{{ report.personnel_changes.left_names|join('、') if report.personnel_changes.left_names else '-' }}</td></tr>
+                <tr><th>{{ texts.get('report_personnel_status_changes_label', 'Status Changes') }}</th><td>{{ report.personnel_changes.status_changes|join('；') if report.personnel_changes.status_changes else '-' }}</td></tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.traceability %}
+        <h3>{{ texts.get('traceability_title', '事件追溯') }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('traceability_event_total', '事件总数') }}</th><td>{{ report.traceability.summary.event_total }}</td></tr>
+                <tr><th>{{ texts.get('traceability_stage_total', '覆盖环节') }}</th><td>{{ report.traceability.summary.stage_total }}</td></tr>
+                <tr><th>{{ texts.get('traceability_top_stage', '最活跃环节') }}</th><td>{{ report.traceability.summary.top_stage }}</td></tr>
+                <tr><th>{{ texts.get('traceability_latest_time', '最近时间') }}</th><td>{{ report.traceability.summary.latest_time }}</td></tr>
+                <tr><th>{{ texts.get('traceability_recent_title', '最近事件') }}</th><td>{% if report.traceability.events %}{% for item in report.traceability.events[:4] %}{{ item.created_at }} {{ item.stage_label }} · {{ item.action }}{% if not loop.last %}<br>{% endif %}{% endfor %}{% else %}-{% endif %}</td></tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if report.forecast %}
+        <h3>{{ texts.get('forecast_title', '预测层') }}</h3>
+        <table>
+            <tbody>
+                <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.forecast.summary }}</td></tr>
+                <tr><th>{{ texts.get('forecast_top_risk_label', '明日主风险') }}</th><td>{{ report.forecast.top_risk }}</td></tr>
+                <tr><th>{{ texts.get('forecast_tomorrow_saw_label', '明日锯解预测') }}</th><td>{{ report.forecast.predictions.tomorrow_saw_trays }}</td></tr>
+                <tr><th>{{ texts.get('forecast_tomorrow_sort_label', '明日待入窑预测') }}</th><td>{{ report.forecast.predictions.tomorrow_sort_trays }}</td></tr>
+                <tr><th>{{ texts.get('forecast_tomorrow_finish_label', '明日成品件数预测') }}</th><td>{{ report.forecast.predictions.tomorrow_finished_pcs }}</td></tr>
+                <tr><th>{{ texts.get('forecast_tomorrow_finish_m3_label', '明日成品m³预测') }}</th><td>{{ report.forecast.predictions.tomorrow_finished_m3 }}</td></tr>
+                <tr><th>{{ texts.get('forecast_actions_label', '明日动作') }}</th><td>{{ report.forecast.actions|join('；') if report.forecast.actions else '-' }}</td></tr>
+                <tr><th>{{ texts.get('forecast_risk_drivers_label', '风险来源') }}</th><td>{{ report.forecast.risk_drivers|join('；') if report.forecast.risk_drivers else '-' }}</td></tr>
+                <tr><th>{{ texts.get('forecast_calibration_label', '预测校准') }}</th><td>{{ texts.get('forecast_hit_rate_label', '命中率') }} {{ report.forecast.calibration.hit_rate if report.forecast.calibration.hit_rate is not none else '-' }} / {{ texts.get('forecast_avg_error_label', '平均绝对误差') }} {{ report.forecast.calibration.avg_abs_error if report.forecast.calibration.avg_abs_error is not none else '-' }}</td></tr>
             </tbody>
         </table>
         {% endif %}
@@ -244,6 +315,7 @@ BOSS_DAILY_REPORT_TEMPLATE = """
         {% if report.ai_deep_monitor and report.ai_deep_monitor.summary %}
         <div class="panel">
             <h3>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h3>
+            <div class="muted">{{ report.ai_deep_monitor.generated_at }} · {{ report.ai_deep_monitor.trigger }} · {{ texts.get('ai_template_version_label', 'Template') }} {{ report.ai_deep_monitor.template_version or 'deep_monitor_v2' }}</div>
             <table class="kv-table ai-tight">
                 <tbody>
                     <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.ai_deep_monitor.summary }}</td></tr>
@@ -263,6 +335,23 @@ BOSS_DAILY_REPORT_TEMPLATE = """
                     <tr><th>{{ texts.get('report_root_reason_label', 'Improvement Basis') }}</th><td>{{ report.factory_intelligence.priority_stage.reason if report.factory_intelligence.priority_stage else report.factory_intelligence.root_bottleneck.reason }}</td></tr>
                     <tr><th>{{ texts.get('report_symptom_stage_label', 'Current Pressure Stage') }}</th><td>{{ report.factory_intelligence.pressure_stage.name if report.factory_intelligence.pressure_stage else report.factory_intelligence.bottleneck.name }}</td></tr>
                     <tr><th>{{ texts.get('report_intelligence_brief_label', 'AI Brief') }}</th><td>{{ report.factory_intelligence.brief }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if report.personnel_changes %}
+        <div class="panel">
+            <h3>{{ texts.get('report_personnel_changes_title', 'Personnel Changes') }}</h3>
+            <table class="kv-table ai-tight">
+                <tbody>
+                    <tr><th>{{ texts.get('report_personnel_changes_summary_label', 'Summary') }}</th><td>{{ report.personnel_changes.summary }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_added_label', 'Added') }}</th><td>{{ report.personnel_changes.added_count }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_left_label', 'Left') }}</th><td>{{ report.personnel_changes.left_count }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_net_change_label', 'Net Change') }}</th><td>{{ report.personnel_changes.net_change }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_added_names_label', 'Added Names') }}</th><td>{{ report.personnel_changes.added_names|join('、') if report.personnel_changes.added_names else '-' }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_left_names_label', 'Left Names') }}</th><td>{{ report.personnel_changes.left_names|join('、') if report.personnel_changes.left_names else '-' }}</td></tr>
+                    <tr><th>{{ texts.get('report_personnel_status_changes_label', 'Status Changes') }}</th><td>{{ report.personnel_changes.status_changes|join('；') if report.personnel_changes.status_changes else '-' }}</td></tr>
                 </tbody>
             </table>
         </div>

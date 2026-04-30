@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>预警值设置</title>
+    <title>{{ texts.get('alert_settings_page_title', '预警值设置') }}</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='AIF_logo.png') }}">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -17,40 +17,154 @@
         .row input { width: 220px; padding:8px; border:1px solid #cbd5e1; border-radius:6px; }
         .hint { color:#64748b; font-size:12px; }
         .btn { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; background:#16a34a; color:#fff; font-size:14px; }
+        .btn-secondary { background:#0f766e; }
+        .action-row { display:flex; gap:12px; flex-wrap:wrap; margin-top:14px; }
         .msg { margin: 10px 0 0; font-size:13px; color:#0f766e; }
     </style>
 </head>
 <body>
     <div class="container">
-        <a href="{{ url_for('admin_root') }}" class="back-link">← 管理总览</a>
-        <a href="{{ url_for('admin_users') }}" class="link-inline">用户管理</a>
-        <a href="{{ url_for('admin_audit_logs') }}" class="link-inline">审计日志</a>
-        <h1>库存预警值设置</h1>
-        <form method="POST" action="{{ url_for('admin_alert_settings') }}">
+        <a href="{{ url_for('admin_root', lang=lang) }}" class="back-link">← {{ texts.get('admin_overview_title', '管理总览') }}</a>
+        <a href="{{ url_for('admin_users', lang=lang) }}" class="link-inline">{{ texts.get('user_mgmt_title', '用户管理') }}</a>
+        <a href="{{ url_for('admin_audit_logs', lang=lang) }}" class="link-inline">{{ texts.get('audit_logs', '审计日志') }}</a>
+        <a href="{{ url_for('admin_traceability', lang=lang) }}" class="link-inline">{{ texts.get('traceability_title', '事件追溯') }}</a>
+        <h1>{{ texts.get('alert_settings_heading', '库存预警值设置') }}</h1>
+        <form method="POST" action="{{ url_for('admin_alert_settings', lang=lang) }}">
             <div class="card">
                 <div class="row">
-                    <label>原木库存最低预警（MT）</label>
+                    <label>{{ texts.get('alert_log_stock_mt_min', '原木库存最低预警（MT）') }}</label>
                     <input type="number" step="0.0001" min="0" name="log_stock_mt_min" value="{{ settings.log_stock_mt_min }}" required>
                 </div>
                 <div class="row">
-                    <label>待入窑库存最低预警（托）</label>
+                    <label>{{ texts.get('alert_sorting_stock_tray_min', '待入窑库存最低预警（托）') }}</label>
                     <input type="number" step="1" min="0" name="sorting_stock_tray_min" value="{{ settings.sorting_stock_tray_min }}" required>
                 </div>
                 <div class="row">
-                    <label>窑完成库存最高预警（托）</label>
+                    <label>{{ texts.get('alert_kiln_done_stock_tray_max', '窑完成库存最高预警（托）') }}</label>
                     <input type="number" step="1" min="0" name="kiln_done_stock_tray_max" value="{{ settings.kiln_done_stock_tray_max }}" required>
                 </div>
                 <div class="row">
-                    <label>成品可发货托数最低预警（托）</label>
+                    <label>{{ texts.get('alert_product_shippable_tray_min', '成品可发货托数最低预警（托）') }}</label>
                     <input type="number" step="1" min="0" name="product_shippable_tray_min" value="{{ settings.product_shippable_tray_min }}" required>
                 </div>
                 <div class="row">
-                    <label>单窑最大容量（托）</label>
+                    <label>{{ texts.get('alert_kiln_max_trays', '单窑最大容量（托）') }}</label>
                     <input type="number" step="1" min="1" name="kiln_max_trays" value="{{ settings.kiln_max_trays }}" required>
                 </div>
-                <p class="hint">保存后立即生效，首页与老板端预警将按托数阈值计算。</p>
+                <p class="hint">{{ texts.get('alert_settings_hint', '保存后立即生效，首页与老板端预警将按托数阈值计算。') }}</p>
             </div>
-            <button type="submit" class="btn">保存预警值</button>
+            <div class="card">
+                <h3 style="margin-top:0;">{{ texts.get('ai_monitor_settings_title', 'AI巡检设置') }}</h3>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_active_start', '巡检开始时间') }}</label>
+                    <input type="time" name="ai_monitor_active_start" value="{{ ai_monitor_settings.active_start }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_active_end', '巡检结束时间') }}</label>
+                    <input type="time" name="ai_monitor_active_end" value="{{ ai_monitor_settings.active_end }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_idle_hours', '保底巡检周期（小时）') }}</label>
+                    <input type="number" step="1" min="1" name="ai_monitor_idle_hours" value="{{ ai_monitor_settings.idle_monitor_hours }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_db_settle_minutes', '数据库更新后等待（分钟）') }}</label>
+                    <input type="number" step="1" min="5" name="ai_monitor_db_settle_minutes" value="{{ ai_monitor_settings.db_change_settle_minutes }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_min_gap_minutes', '两次深巡检最小间隔（分钟）') }}</label>
+                    <input type="number" step="1" min="5" name="ai_monitor_min_gap_minutes" value="{{ ai_monitor_settings.deep_monitor_min_gap_minutes }}" required>
+                </div>
+                <p class="hint">{{ texts.get('ai_monitor_settings_hint', '只会在设定时间段内进行深度巡检。数据库更新后先等待一段时间，等待中若再次更新会重新计时；若达到保底周期，则优先执行保底巡检。') }}</p>
+            </div>
+            <div class="card">
+                <h3 style="margin-top:0;">{{ texts.get('ai_capacity_settings_title', 'AI产线协同参数') }}</h3>
+                <div class="row">
+                    <label>{{ texts.get('ai_band_saw_machine_count', '带锯台数') }}</label>
+                    <input type="number" step="1" min="1" name="band_saw_machine_count" value="{{ ai_capacity_settings.band_saw_machine_count }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_band_saw_primary_target', '主锯应配人数') }}</label>
+                    <input type="number" step="1" min="0" name="band_saw_primary_target" value="{{ ai_capacity_settings.band_saw_primary_target }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_band_saw_assistant_target', '副锯应配人数') }}</label>
+                    <input type="number" step="1" min="0" name="band_saw_assistant_target" value="{{ ai_capacity_settings.band_saw_assistant_target }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_band_saw_qc_target', '锯QC应配人数') }}</label>
+                    <input type="number" step="1" min="0" name="band_saw_qc_target" value="{{ ai_capacity_settings.band_saw_qc_target }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_band_saw_daily_target_trays_per_machine', '单台带锯日产目标（托）') }}</label>
+                    <input type="number" step="1" min="1" name="band_saw_daily_target_trays_per_machine" value="{{ ai_capacity_settings.band_saw_daily_target_trays_per_machine }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_secondary_saw_machine_count', '二选台锯数量') }}</label>
+                    <input type="number" step="1" min="1" name="secondary_saw_machine_count" value="{{ ai_capacity_settings.secondary_saw_machine_count }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_secondary_saw_operator_target', '台锯工应配人数') }}</label>
+                    <input type="number" step="1" min="0" name="secondary_saw_operator_target" value="{{ ai_capacity_settings.secondary_saw_operator_target }}" required>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_secondary_daily_finish_target_pcs', '二选日产成品目标（件）') }}</label>
+                    <input type="number" step="1" min="1" name="secondary_daily_finish_target_pcs" value="{{ ai_capacity_settings.secondary_daily_finish_target_pcs }}" required>
+                </div>
+                <p class="hint">{{ texts.get('ai_capacity_settings_hint', '这些是 AI 做全厂协同分析时使用的现场标准值，包括设备台数、应配人数和日产目标。修改后会直接影响深巡检、HR协同建议和全站 AI 分析。') }}</p>
+            </div>
+            <div class="card">
+                <h3 style="margin-top:0;">{{ texts.get('ai_monitor_runtime_title', 'AI巡检状态') }}</h3>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_last_run_at', '最近一次深巡检') }}</label>
+                    <div>{{ ai_monitor_runtime.last_generated_at or texts.get('ai_monitor_not_run_yet', '尚未执行') }}</div>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_next_run_at', '下次预计巡检') }}</label>
+                    <div>{{ ai_monitor_runtime.next_run_at }}</div>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_next_reason', '预计触发方式') }}</label>
+                    <div>
+                        {% if ai_monitor_runtime.next_reason == 'periodic' %}
+                            {{ texts.get('ai_monitor_reason_periodic', '保底周期') }}
+                        {% elif ai_monitor_runtime.next_reason == 'db_change' %}
+                            {{ texts.get('ai_monitor_reason_db_change', '数据库更新后等待完成') }}
+                        {% elif ai_monitor_runtime.next_reason == 'running' %}
+                            {{ texts.get('ai_monitor_reason_running', '当前正在巡检') }}
+                        {% else %}
+                            {{ ai_monitor_runtime.next_reason or '-' }}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_pending_state', '等待中的数据库更新') }}</label>
+                    <div>
+                        {% if ai_monitor_runtime.pending_db_change %}
+                            {{ texts.get('yes', '是') }}{% if ai_monitor_runtime.pending_due_at %} · {{ ai_monitor_runtime.pending_due_at }}{% endif %}
+                        {% else %}
+                            {{ texts.get('no', '否') }}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="row">
+                    <label>{{ texts.get('ai_monitor_current_window', '当前巡检时间段') }}</label>
+                    <div>{{ ai_monitor_runtime.window_start }} - {{ ai_monitor_runtime.window_end }}</div>
+                </div>
+                <p class="hint">
+                    {% if ai_monitor_runtime.is_running %}
+                        {{ texts.get('ai_monitor_runtime_hint_running', '当前正在进行一轮深巡检，下一次预计时间会在本轮完成后更新。') }}
+                    {% elif ai_monitor_runtime.in_window %}
+                        {{ texts.get('ai_monitor_runtime_hint_in_window', '当前处于允许巡检时间段，若达到条件会按策略自动执行。') }}
+                    {% else %}
+                        {{ texts.get('ai_monitor_runtime_hint_outside_window', '当前不在巡检时间段内，系统会先记录数据更新，等进入时间窗口后再按策略执行。') }}
+                    {% endif %}
+                </p>
+            </div>
+            <div class="action-row">
+                <button type="submit" class="btn">{{ texts.get('save_alert_and_ai_monitor', '保存预警与AI巡检设置') }}</button>
+                <button type="submit" class="btn btn-secondary" name="form_type" value="manual_ai_monitor">{{ texts.get('manual_ai_monitor_run', '手动巡检') }}</button>
+            </div>
             {% if result_msg %}
             <div class="msg">{{ result_msg }}</div>
             {% endif %}

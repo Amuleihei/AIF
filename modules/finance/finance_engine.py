@@ -69,10 +69,26 @@ def save(d):
 # 记录工具
 # =====================================================
 
-def add_record(d, typ, amount, account, note="", category="", ref_no="", operator=""):
+def _resolve_entry_time(entry_time: str = "", entry_date: str = "") -> str:
+    ts = str(entry_time or "").strip()
+    if ts:
+        try:
+            return datetime.fromisoformat(ts).isoformat()
+        except Exception:
+            pass
+    dt = str(entry_date or "").strip()
+    if dt:
+        try:
+            return datetime.strptime(dt, "%Y-%m-%d").replace(hour=12, minute=0, second=0, microsecond=0).isoformat()
+        except Exception:
+            pass
+    return datetime.now().isoformat()
+
+
+def add_record(d, typ, amount, account, note="", category="", ref_no="", operator="", entry_time="", entry_date=""):
 
     d["records"].append({
-        "time": datetime.now().isoformat(),
+        "time": _resolve_entry_time(entry_time=entry_time, entry_date=entry_date),
         "type": typ,
         "amount": amount,
         "account": account,
@@ -87,13 +103,24 @@ def add_record(d, typ, amount, account, note="", category="", ref_no="", operato
 # 收入
 # =====================================================
 
-def income(d, amount, note, account="cash", category="", ref_no="", operator=""):
+def income(d, amount, note, account="cash", category="", ref_no="", operator="", entry_time="", entry_date=""):
 
     d["accounts"].setdefault(account, 0.0)
 
     d["accounts"][account] += amount
 
-    add_record(d, "income", amount, account, note, category=category, ref_no=ref_no, operator=operator)
+    add_record(
+        d,
+        "income",
+        amount,
+        account,
+        note,
+        category=category,
+        ref_no=ref_no,
+        operator=operator,
+        entry_time=entry_time,
+        entry_date=entry_date,
+    )
 
     return f"💰 收入 {amount:.2f} {CURRENCY} → {account}"
 
@@ -102,7 +129,7 @@ def income(d, amount, note, account="cash", category="", ref_no="", operator="")
 # 支出
 # =====================================================
 
-def expense(d, amount, note, account="cash", category="", ref_no="", operator=""):
+def expense(d, amount, note, account="cash", category="", ref_no="", operator="", entry_time="", entry_date=""):
 
     d["accounts"].setdefault(account, 0.0)
 
@@ -111,7 +138,18 @@ def expense(d, amount, note, account="cash", category="", ref_no="", operator=""
 
     d["accounts"][account] -= amount
 
-    add_record(d, "expense", amount, account, note, category=category, ref_no=ref_no, operator=operator)
+    add_record(
+        d,
+        "expense",
+        amount,
+        account,
+        note,
+        category=category,
+        ref_no=ref_no,
+        operator=operator,
+        entry_time=entry_time,
+        entry_date=entry_date,
+    )
 
     return f"💸 支出 {amount:.2f} {CURRENCY} ← {account}"
 
@@ -120,7 +158,7 @@ def expense(d, amount, note, account="cash", category="", ref_no="", operator=""
 # 转账
 # =====================================================
 
-def transfer(d, amount, src, dst, note="", ref_no="", operator=""):
+def transfer(d, amount, src, dst, note="", ref_no="", operator="", entry_time="", entry_date=""):
 
     d["accounts"].setdefault(src, 0.0)
     d["accounts"].setdefault(dst, 0.0)
@@ -131,7 +169,18 @@ def transfer(d, amount, src, dst, note="", ref_no="", operator=""):
     d["accounts"][src] -= amount
     d["accounts"][dst] += amount
 
-    add_record(d, "transfer", amount, f"{src}->{dst}", note, category="transfer", ref_no=ref_no, operator=operator)
+    add_record(
+        d,
+        "transfer",
+        amount,
+        f"{src}->{dst}",
+        note,
+        category="transfer",
+        ref_no=ref_no,
+        operator=operator,
+        entry_time=entry_time,
+        entry_date=entry_date,
+    )
 
     return f"🔁 转账 {amount:.2f} {CURRENCY} {src} → {dst}"
 

@@ -157,44 +157,29 @@ BOSS_H5_TEMPLATE = """
         </div>
         {% endif %}
 
-        {% if factory_intelligence %}
-        <div class="card" style="border-left:4px solid #0f766e; background:linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);">
-            <h2>{{ texts.get('intelligence_card_title', 'Intelligence View') }}</h2>
+        {% if traceability_snapshot and traceability_snapshot.summary %}
+        <div class="card">
+            <h2>{{ texts.get('traceability_title', '事件追溯') }}</h2>
             <div class="grid">
                 <div class="metric">
-                    <div class="k">{{ texts.get('intelligence_root_cause', 'Priority Improvement Stage') }}</div>
-                    <div class="v" style="font-size:18px;">{{ factory_intelligence.priority_stage.name if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.name }}</div>
-                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.priority_stage.reason if factory_intelligence.priority_stage else factory_intelligence.root_bottleneck.reason }}</div>
+                    <div class="k">{{ texts.get('traceability_event_total', '事件总数') }}</div>
+                    <div class="v">{{ traceability_snapshot.summary.event_total }}</div>
                 </div>
                 <div class="metric">
-                    <div class="k">{{ texts.get('intelligence_symptom_stage', 'Current Pressure Stage') }}</div>
-                    <div class="v" style="font-size:18px;">{{ factory_intelligence.pressure_stage.name if factory_intelligence.pressure_stage else factory_intelligence.bottleneck.name }}</div>
-                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.brief }}</div>
+                    <div class="k">{{ texts.get('traceability_top_stage', '最活跃环节') }}</div>
+                    <div class="v" style="font-size:18px;">{{ traceability_snapshot.summary.top_stage }}</div>
                 </div>
             </div>
-            {% if factory_intelligence.weekly_progress %}
-            <div class="metric" style="margin-top:10px;">
-                <div class="k">{{ texts.get('weekly_progress_title', 'Weekly Improvement') }}</div>
-                <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ factory_intelligence.weekly_progress.summary }}</div>
-            </div>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {% if ai_deep_monitor and ai_deep_monitor.summary %}
-        <div class="card" style="border-left:4px solid #0f172a; background:linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);">
-            <h2>{{ texts.get('intelligence_panel_title', 'AI建议') }}</h2>
-            <div style="color:#4b5563; font-size:13px;">{{ ai_deep_monitor.generated_at }} · {{ ai_deep_monitor.trigger }}</div>
-            <div style="margin-top:10px; color:#0f172a; line-height:1.6;">{{ ai_deep_monitor.summary }}</div>
-            <div class="grid" style="margin-top:10px;">
-                <div class="metric">
-                    <div class="k">{{ texts.get('ai_quick_today_focus', 'Today Focus') }}</div>
-                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.focus[0] if ai_deep_monitor.focus else '-' }}</div>
+            <div style="margin-top:10px; display:grid; gap:6px;">
+                {% for item in traceability_snapshot.events[:4] %}
+                <div style="padding:8px 10px; border:1px solid #e5e7eb; border-radius:10px; background:#fbfdff;">
+                    <div style="display:flex; justify-content:space-between; gap:8px;">
+                        <strong>{{ item.stage_label }}</strong>
+                        <span class="muted">{{ item.created_at }}</span>
+                    </div>
+                    <div style="margin-top:4px; font-size:13px;">{{ item.action }} · {{ item.target or '-' }}</div>
                 </div>
-                <div class="metric">
-                    <div class="k">{{ texts.get('risk_alerts_title', 'Risk Alerts') }}</div>
-                    <div style="margin-top:6px; color:#4b5563; font-size:13px;">{{ ai_deep_monitor.risks[0] if ai_deep_monitor.risks else '-' }}</div>
-                </div>
+                {% endfor %}
             </div>
         </div>
         {% endif %}

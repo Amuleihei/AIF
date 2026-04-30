@@ -30,6 +30,7 @@ FINANCE_CATEGORIES = [
 ]
 PAYROLL_BATCH_DOC_KEY = "finance_payroll_batches_v1"
 ARAP_DOC_KEY = "finance_arap_v1"
+RAW_LOG_POST_DOC_KEY = "finance_raw_log_posts_v1"
 
 
 def _pack(lang: str) -> str:
@@ -66,6 +67,16 @@ def _parse_iso(ts: str) -> datetime | None:
         return datetime.fromisoformat(str(ts or ""))
     except Exception:
         return None
+
+
+def _resolve_entry_iso(entry_date: str = "", fallback: datetime | None = None) -> str:
+    text = str(entry_date or "").strip()
+    if text:
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").replace(hour=12, minute=0, second=0, microsecond=0).isoformat()
+        except Exception:
+            pass
+    return (fallback or datetime.now()).isoformat()
 
 
 def _date_span(mode: str) -> tuple[datetime, datetime]:
@@ -125,6 +136,15 @@ def _load_arap_items() -> list[dict[str, Any]]:
 
 def _save_arap_items(rows: list[dict[str, Any]]) -> None:
     save_doc(ARAP_DOC_KEY, rows if isinstance(rows, list) else [])
+
+
+def _load_raw_log_posts() -> list[dict[str, Any]]:
+    data = load_doc(RAW_LOG_POST_DOC_KEY, default=[], legacy_file=None)
+    return data if isinstance(data, list) else []
+
+
+def _save_raw_log_posts(rows: list[dict[str, Any]]) -> None:
+    save_doc(RAW_LOG_POST_DOC_KEY, rows if isinstance(rows, list) else [])
 
 
 def _filter_records(
@@ -300,7 +320,11 @@ def _month_close_summary(records: list[dict[str, Any]], costs: dict[str, Any], a
 
 def _build_finance_ai(factory_intelligence: dict, records: list[dict[str, Any]], balances: dict[str, float], cost_data: dict[str, Any], lang: str) -> dict[str, Any]:
     lc = _pack(lang)
-    root = (factory_intelligence or {}).get("root_bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    root = (
+        (factory_intelligence or {}).get("priority_stage", {})
+        if isinstance(factory_intelligence, dict) and isinstance((factory_intelligence or {}).get("priority_stage"), dict)
+        else (factory_intelligence or {}).get("root_bottleneck", {}) if isinstance(factory_intelligence, dict) else {}
+    )
     root_name = str(root.get("name") or "").strip()
     root_reason = str(root.get("reason") or "").strip()
     today_flow = _compute_flow(records, "day")
@@ -456,6 +480,8 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
     ref_no = str(form.get("ref_no") or "").strip()
     category = str(form.get("category") or "").strip()
     account = str(form.get("account") or "cash").strip() or "cash"
+    entry_date = str(form.get("entry_date") or "").strip()
+    entry_iso = _resolve_entry_iso(entry_date)
 
     if act in ("income", "expense") and amount <= 0:
         return False, "❌ 金额必须大于 0"
@@ -463,11 +489,11 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
         return False, "❌ 备注不能为空"
 
     if act == "income":
-        msg = income(fin, amount, note, account=account, category=category, ref_no=ref_no, operator=operator)
+        msg = income(fin, amount, note, account=account, category=category, ref_no=ref_no, operator=operator, entry_time=entry_iso)
         save_finance(fin)
         return True, msg
     if act == "expense":
-        msg = expense(fin, amount, note, account=account, category=category, ref_no=ref_no, operator=operator)
+        msg = expense(fin, amount, note, account=account, category=category, ref_no=ref_no, operator=operator, entry_time=entry_iso)
         if str(msg).startswith("❌"):
             return False, msg
         save_finance(fin)
@@ -479,7 +505,7 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
             return False, "❌ 转出与转入账户不能相同"
         if amount <= 0:
             return False, "❌ 转账金额必须大于 0"
-        msg = transfer(fin, amount, src, dst, note=note, ref_no=ref_no, operator=operator)
+        msg = transfer(fin, amount, src, dst, note=note, ref_no=ref_no, operator=operator, entry_time=entry_iso)
         if str(msg).startswith("❌"):
             return False, msg
         save_finance(fin)
@@ -494,7 +520,16 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
         save_cost(cost)
         sync_expense = str(form.get("sync_expense") or "").strip() in ("1", "true", "on", "yes")
         if sync_expense:
-            msg = expense(fin, amount, note or f"成本入账:{cost_key}", account=account, category=category or cost_key, ref_no=ref_no, operator=operator)
+            msg = expense(
+                fin,
+                amount,
+                note or f"成本入账:{cost_key}",
+                account=account,
+                category=category or cost_key,
+                ref_no=ref_no,
+                operator=operator,
+                entry_time=entry_iso,
+            )
             if str(msg).startswith("❌"):
                 return False, msg
             save_finance(fin)
@@ -520,8 +555,8 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
             "ref_no": ref_no,
             "note": note,
             "operator": operator,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
+            "created_at": entry_iso,
+            "updated_at": entry_iso,
         }
         items.append(item)
         _save_arap_items(items[-400:])
@@ -543,15 +578,33 @@ def apply_finance_form(action: str, form: dict[str, Any], operator: str = "") ->
             return False, "❌ 结清金额不能大于未结金额"
         base_note = settle_note or str(row.get("note") or "").strip() or str(row.get("party") or "").strip()
         if kind == "receivable":
-            msg = income(fin, settle_amount, f"应收回款 | {base_note}", account=settle_account, category="sales_income", ref_no=str(row.get("ref_no") or row.get("id") or ""), operator=operator)
+            msg = income(
+                fin,
+                settle_amount,
+                f"应收回款 | {base_note}",
+                account=settle_account,
+                category="sales_income",
+                ref_no=str(row.get("ref_no") or row.get("id") or ""),
+                operator=operator,
+                entry_time=entry_iso,
+            )
         else:
-            msg = expense(fin, settle_amount, f"应付付款 | {base_note}", account=settle_account, category="other_expense", ref_no=str(row.get("ref_no") or row.get("id") or ""), operator=operator)
+            msg = expense(
+                fin,
+                settle_amount,
+                f"应付付款 | {base_note}",
+                account=settle_account,
+                category="other_expense",
+                ref_no=str(row.get("ref_no") or row.get("id") or ""),
+                operator=operator,
+                entry_time=entry_iso,
+            )
         if str(msg).startswith("❌"):
             return False, msg
         row["settled_amount"] = round(_safe_float(row.get("settled_amount"), 0.0) + settle_amount, 2)
         row["status"] = "paid" if row["settled_amount"] >= _safe_float(row.get("amount"), 0.0) else "partial"
-        row["updated_at"] = datetime.now().isoformat()
-        row["settled_at"] = datetime.now().isoformat() if row["status"] == "paid" else row.get("settled_at")
+        row["updated_at"] = entry_iso
+        row["settled_at"] = entry_iso if row["status"] == "paid" else row.get("settled_at")
         save_finance(fin)
         _save_arap_items(items[-400:])
         return True, f"✅ {_ar_item_title(kind, 'zh')}已结清 {settle_amount:.2f} KS"
@@ -638,3 +691,69 @@ def post_payroll_to_finance(
     )
     _save_payroll_batches(batches[-200:])
     return True, f"✅ 工资已入账，共 {len(rows)} 人，合计 {total:.2f} KS，批次 {ref}"
+
+
+def post_raw_log_entry_to_finance(
+    *,
+    log_entry_id: int,
+    truck_number: str,
+    driver_name: str,
+    log_amount: float,
+    total_amount_ks: float,
+    operator: str = "",
+) -> tuple[bool, str]:
+    entry_id = int(log_entry_id or 0)
+    total_amount = round(max(0.0, _safe_float(total_amount_ks, 0.0)), 2)
+    if entry_id <= 0:
+        return False, "❌ 原木入库编号无效"
+    if total_amount <= 0:
+        return False, "⚠️ 原木入库未计价，暂未联动财务"
+
+    ref = f"RAWLOG-{entry_id}"
+    posted_rows = _load_raw_log_posts()
+    if any(str(row.get("ref_no") or "") == ref for row in posted_rows if isinstance(row, dict)):
+        return False, f"⚠️ 原木入库已联动财务: {ref}"
+
+    party = str(driver_name or "").strip() or str(truck_number or "").strip() or f"原木入库 {entry_id}"
+    truck = str(truck_number or "").strip()
+    amount_mt = round(max(0.0, _safe_float(log_amount, 0.0)), 4)
+    note = f"原木入库待付款 | 车牌 {truck or '-'} | {amount_mt:.4f} MT"
+
+    arap_items = _load_arap_items()
+    arap_items.append(
+        {
+            "id": uuid4().hex[:12],
+            "kind": "payable",
+            "party": party,
+            "amount": total_amount,
+            "settled_amount": 0.0,
+            "status": "open",
+            "due_date": "",
+            "ref_no": ref,
+            "note": note,
+            "operator": operator,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+    )
+    _save_arap_items(arap_items[-400:])
+
+    cost = load_cost()
+    cost["raw_material"] = round(_safe_float(cost.get("raw_material"), 0.0) + total_amount, 2)
+    save_cost(cost)
+
+    posted_rows.append(
+        {
+            "ref_no": ref,
+            "log_entry_id": entry_id,
+            "truck_number": truck,
+            "driver_name": party,
+            "log_amount": amount_mt,
+            "amount_ks": total_amount,
+            "operator": operator,
+            "posted_at": datetime.now().isoformat(),
+            "status": "posted",
+        }
+    )
+    _save_raw_log_posts(posted_rows[-400:])
+    return True, f"✅ 已联动财务：新增原木应付 {total_amount:.2f} KS，并同步计入原料成本"
